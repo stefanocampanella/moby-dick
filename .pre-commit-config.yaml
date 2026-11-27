@@ -41,14 +41,16 @@ repos:
 
   - repo: local
     hooks:
-      # The tests of the shell scripts, with bats-core from the submodules in tests/bats/helpers (`git submodule update
-      # --init`). They run in the CI job `bats`.
+      # The tests of the shell scripts, with bats-core from the submodules in tests/bats/helpers. They run in the CI
+      # job `bats`.
       - id: bats
         name: bats
         language: system
         pass_filenames: false
         files: ^(scripts/|clusters/|tests/bats/|configs/training/demo_5000\.toml$)
-        entry: tests/bats/helpers/bats-core/bin/bats tests/bats
+        entry: >-
+          bash -c 'bats=tests/bats/helpers/bats-core/bin/bats; if [[ ! -x $bats ]]; then
+          echo "bats-core is missing: run git submodule update --init" >&2; exit 1; fi; exec "$bats" tests/bats'
       # ty from the environment, which has the dependencies to resolve imports. The NVIDIA JAX image installs jax,
       # jaxlib and flax in editable mode outside the virtual environment, which ty does not follow: add their paths
       # where they exist.

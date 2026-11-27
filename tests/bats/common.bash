@@ -24,6 +24,8 @@ common_setup() {
     mkdir -p "${PROJECT}" "${STUBS}"
     PATH="${STUBS}:${PATH}"
     export CALLS="${BATS_TEST_TMPDIR}/calls"
+    # Module systems such as Lmod export `module` as a shell function, which would win over the stand-in on PATH.
+    unset -f module ml 2> /dev/null || true
     # Nothing of the caller's site environment reaches the scripts.
     unset APPTAINER_IMAGE APPTAINERENV_PREPEND_PATH DATA_ROOT DATA_DIR DATASET MASK TENDENCY_STD GEOMETRY_DIR \
         PROJECT_DIR CONFIG_DIR OUTPUT_DIR TRAIN_DIR TB_DIR LOG_DIR LOG_LEVEL SLURM_SUBMIT_DIR SLURM_JOB_ID \
@@ -32,8 +34,9 @@ common_setup() {
     mkdir -p "${HOME}"
 }
 
-# A stand-in for a command, first on PATH: it records its name and arguments, one call per line, in $CALLS, then
-# runs BODY (shell code; "$@" are its arguments). Usage: stub NAME [BODY].
+# A stand-in for a command, first on PATH: it records its name and arguments, one call per line, in $CALLS, each
+# argument quoted for the shell (`printf %q`: an argument with a space reads `a\ b`, so that a split or lost argument
+# shows), then runs BODY (shell code; "$@" are its arguments). Usage: stub NAME [BODY].
 stub() {
     stub_at "${STUBS}/$1" "${2:-}"
 }
@@ -44,7 +47,8 @@ stub_at() {
     mkdir -p "$(dirname "$1")"
     {
         echo '#!/usr/bin/env bash'
-        echo "echo \"$(basename "$1") \$*\" >> \"\${CALLS}\""
+        # A loop, not printf ' %q' "$@": printf repeats its format once even without arguments.
+        echo "{ printf %s $(basename "$1"); for a in \"\$@\"; do printf ' %q' \"\$a\"; done; echo; } >> \"\${CALLS}\""
         printf '%s\n' "${2:-}"
     } > "$1"
     chmod +x "$1"

@@ -129,8 +129,12 @@ ${PROJECT}/configs/training/demo.toml ${PROJECT}/data/models/model ${PROJECT}/da
 
 @test "without Apptainer on PATH the script fails with a message" {
     require_gnu_getopt
-    rm "${STUBS}/apptainer"
-    PATH="${STUBS}:$(dirname "$(command -v getopt)"):/usr/bin:/bin" train demo model ckpt
+    # Only bash and getopt on PATH (as links), so that no Apptainer of the system is found.
+    local bin="${BATS_TEST_TMPDIR}/bin"
+    mkdir -p "${bin}"
+    ln -s "$(command -v bash)" "${bin}/bash"
+    ln -s "$(command -v getopt)" "${bin}/getopt"
+    PATH="${bin}" train demo model ckpt
     assert_failure 1
     assert_output --partial 'apptainer not found'
 }

@@ -106,9 +106,16 @@ jobs:
           # bats-core and its libraries (tests/bats/helpers).
           submodules: true
 
-      # Ubuntu's getopt is GNU's (util-linux), which scripts/train.sh needs: no test is skipped here.
+      # Ubuntu's getopt is GNU's (util-linux), which scripts/train.sh needs: no test may be skipped here.
       - name: Tests of the shell scripts
-        run: tests/bats/helpers/bats-core/bin/bats --print-output-on-failure tests/bats
+        run: |
+          set -o pipefail
+          tests/bats/helpers/bats-core/bin/bats --formatter tap --print-output-on-failure tests/bats | tee bats.tap
+          if grep -q '# skip' bats.tap; then
+            echo "Skipped tests (none may be skipped in CI):" >&2
+            grep '# skip' bats.tap >&2
+            exit 1
+          fi
 
   tests:
     runs-on: ubuntu-24.04

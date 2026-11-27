@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Stefano Campanella
 # SPDX-License-Identifier: Apache-2.0
 #
-# The JUPITER launchers in clusters/jupiter/slurm: how train.slurm and download.slurm source the site environment and
+# The launchers in clusters/jupiter/slurm: how train.slurm and download.slurm source the site environment and
 # hand their arguments to the portable scripts, and the configs and jobs mesh_study.sh makes from the real demo
 # config. Slurm, the module system and the scripts they start are stand-ins. The launchers run with bash, as sbatch
 # runs them (download.slurm is not executable).
@@ -46,7 +46,7 @@ EOF
     run calls
     assert_line --index 2 --regexp "^srun --export=ALL --kill-on-bad-exit=1 --output=${PROJECT}/logs/training/%j_%N_%t.out \
 --error=${PROJECT}/logs/training/%j_%N_%t.err ${PROJECT}/scripts/train.sh --project-dir ${PROJECT} --continue --bind \
-a b:/data/x --log-level debug demo model ckpt$"
+a\\\\ b:/data/x --log-level debug demo model ckpt$"
     assert_line --index 3 'DATASET=/site/dataset SRUN_CPUS_PER_TASK=72'
 }
 
