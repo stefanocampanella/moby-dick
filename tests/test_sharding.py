@@ -88,7 +88,9 @@ def test_data_parallel_predictions_equal_the_plain_ones(mesh, tiny_model):
   params = plain.init(jax.random.key(0), inputs, targets, forcings)
   expected = plain.apply(params, None, inputs, targets, forcings)
   actual = jax.jit(lambda p, i, t, f: wrapped.apply(p, None, i, t, f))(params, inputs, targets, forcings)
-  np.testing.assert_allclose(actual.zos.data, expected.zos.data, rtol=1e-5, atol=1e-6)
+  # The jitted, sharded predictions and the eager ones sum in different orders (XLA fuses and reorders reductions):
+  # on macOS arm64 one value in a few hundred differs by ~7e-5, as for the gradients above.
+  np.testing.assert_allclose(actual.zos.data, expected.zos.data, rtol=1e-4, atol=1e-6)
 
 
 class _NoisyPredictor(predictor_base.Predictor):

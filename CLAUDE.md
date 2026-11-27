@@ -156,15 +156,25 @@ NVIDIA JAX container `nvcr.io/nvidia/jax:26.09-py3` plus GDAL/PROJ from Spack). 
 - Lint, format, types and licensing are pre-commit hooks (`.pre-commit-config.yaml`): `ruff check --fix` and `ruff
   format` (**2-space indentation**, 120-column lines; the whole codebase was formatted in b210470, listed in
   `.git-blame-ignore-revs`: `git config blame.ignoreRevsFile .git-blame-ignore-revs`), ShellCheck, `reuse lint` and
-  ty. Run them in the image: `apptainer exec moby-dick.sif pre-commit run --all-files` (the first run downloads the
+  ty, plus gitleaks (staged changes only, `--staged`; settings and the allowlisted upstream false positives in
+  `.gitleaks.toml`) and the bats tests. Run them in the image: `apptainer exec moby-dick.sif pre-commit run --all-files` (the first run downloads the
   hook environments: login nodes only), or `pre-commit install` to run them on each commit. The ty hook uses the
   environment's Python and adds the image's editable jax, jaxlib and flax (`/opt/jax`, `/opt/jaxlibs/jaxlib`,
   `/opt/flax`) as extra search paths; by hand: `apptainer exec moby-dick.sif ty check --python /opt/software/venv
   --extra-search-path /opt/jax --extra-search-path /opt/jaxlibs/jaxlib --extra-search-path /opt/flax src tests`.
   `src` and `tests` pass; where ty or the stubs cannot follow the code, use a targeted `# ty: ignore[rule]` with a
   reason. Notebooks are excluded from ruff.
-- CI (`.github/workflows/ci.yml`, GitHub Actions, pushes to `develop`/`main` and pull requests), three independent
-  jobs: `lint` (ruff and ShellCheck hooks, `setup-python` and pre-commit only), `reuse` (the REUSE hook) and `tests`:
+- Shell scripts: **bats-core** tests in `tests/bats` (since 27 Nov 2026; layout as in arco-ocean): bats-core v1.14.0,
+  bats-support v0.3.0, bats-assert v2.2.4 and bats-file v0.4.0 are git submodules in `tests/bats/helpers` (`git
+  submodule update --init`); `common.bash` gives each test its own project directory and stand-ins (`stub`) for
+  `apptainer`, `srun`, `sbatch` and `module`, which record their calls. They cover `scripts/download.sh`,
+  `scripts/train.sh` (skipped without GNU getopt, e.g. on macOS) and the JUPITER launchers (`train.slurm`,
+  `download.slurm`, `mesh_study.sh` with the real `demo_5000.toml`). Run `tests/bats/helpers/bats-core/bin/bats
+  tests/bats` (a few seconds). ShellCheck checks them too (settings in `tests/bats/.shellcheckrc`).
+- CI (`.github/workflows/ci.yml`, GitHub Actions, pushes to `develop`/`main` and pull requests), five independent
+  jobs: `lint` (ruff and ShellCheck hooks, `setup-python` and pre-commit only), `reuse` (the REUSE hook), `secrets`
+  (gitleaks v8.30.1, checksummed release binary, over the whole history of every fetched branch: `fetch-depth: 0`),
+  `bats` (the shell tests, with the submodules) and `tests`:
   Python 3.12 with GDAL 3.13.1 from conda-forge (micromamba; keep in sync with `spack.yaml`), the package and dev group
   from PyPI, the ty hook, and `pytest --cov` with the 80 % gate (run even if ty fails); `coverage.xml` is an artifact and is uploaded to Codecov
   (`codecov/codecov-action`, secret `CODECOV_TOKEN`; upload errors do not fail the run; badge in the README). PROJ is

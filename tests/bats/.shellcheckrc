@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Stefano Campanella
+# SPDX-License-Identifier: Apache-2.0
+# ShellCheck for the bats tests (the nearest .shellcheckrc wins).
+source-path=SCRIPTDIR
+external-sources=true
+# Code in single quotes runs later, in a stand-in: its expansions are meant.
+# REPO, PROJECT, STUBS and CALLS come from common.bash, which bats loads at run time.
+# Each @test runs in its own subshell: its exports are meant to stay there.
+disable=SC2016,SC2153,SC2030,SC2031
