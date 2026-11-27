@@ -81,6 +81,13 @@ def triangle_quality(vertices: np.ndarray, faces: np.ndarray) -> dict[str, np.nd
     vertices: Earth-centred coordinates [num_vertices, 3] (metres).
     faces: Vertex indices [num_faces, 3].
   """
+  # A degenerate face (coincident vertices) divides by zero: its metrics are NaN or infinite, which the shares and
+  # targets count as poor.
+  with np.errstate(divide="ignore", invalid="ignore"):
+    return _triangle_quality(vertices, faces)
+
+
+def _triangle_quality(vertices: np.ndarray, faces: np.ndarray) -> dict[str, np.ndarray]:
   a, b, c = (vertices[faces[:, i]] for i in range(3))
   # Edge lengths [num_faces, 3], each opposite a vertex: |bc|, |ca|, |ab|.
   lengths = np.stack([np.linalg.norm(b - c, axis=1), np.linalg.norm(c - a, axis=1), np.linalg.norm(a - b, axis=1)], 1)
@@ -132,49 +139,66 @@ POOR_LOCATIONS = {0: "touching_boundary", 1: "one_row_in", 2: "deeper"}
 
 
 def threshold_shares(quality: dict[str, np.ndarray]) -> dict[str, Any]:
-  """Number and percentage of the faces beyond each of `QUALITY_THRESHOLDS`."""
+  """Number and percentage of the faces beyond each of `QUALITY_THRESHOLDS`. A degenerate face (NaN metrics, e.g. two
+  coincident vertices) counts beyond every threshold."""
   result = {}
   for name, (metric, comparison, threshold) in QUALITY_THRESHOLDS.items():
     values = quality[metric]
-    selected = values < threshold if comparison == "<" else values > threshold
+    # Written as "not within", so that NaN is beyond.
+    selected = ~(values >= threshold) if comparison == "<" else ~(values <= threshold)
     result[name] = described(f"Faces with {metric} {comparison} {threshold:g}", fraction(selected))
   return result
 
 
 def poor_locations(gamma: np.ndarray, faces: np.ndarray, num_vertices: int) -> dict[str, Any]:
-  """Where the faces with gamma < `POOR_GAMMA` are: number and percentage of them touching the boundary (a vertex on an
-  edge of one face only), one row of faces in, or deeper."""
-  poor = gamma < POOR_GAMMA
+  """Where the faces with gamma < `POOR_GAMMA` (or NaN) are: number and percentage of them (not of all faces)
+  touching the boundary (a vertex on an edge of one face only), one row of faces in, or deeper."""
+  poor = ~(gamma >= POOR_GAMMA)
   rows = face_rows_from_boundary(faces, num_vertices)[poor]
   return {
-    name: described(f"Faces with gamma < {POOR_GAMMA:g} {name.replace('_', ' ')}", fraction(rows == row))
+    name: described(f"Poor faces {name.replace('_', ' ')} (% of the poor faces)", fraction(rows == row))
     for row, name in POOR_LOCATIONS.items()
   }
 
 
 def quality_targets(quality: dict[str, np.ndarray], targets: QualityTargetsConfig) -> dict[str, Any]:
   """Each target with the mesh's value and whether it is met, and whether all are (`passed`). Without faces, no target
-  is met."""
-  num_faces = len(quality["gamma"])
-  worst_gamma = float(quality["gamma"].min()) if num_faces else float("nan")
-  smallest_angle = float(quality["min_angle"].min()) if num_faces else float("nan")
-  poor_percent = float(100 * (quality["gamma"] < POOR_GAMMA).mean()) if num_faces else float("nan")
+  is met. A degenerate face (NaN gamma or angle) fails the worst-gamma and smallest-angle targets, whose values are
+  those of the other faces, and counts as poor; an inverted face fails its own target."""
+  gamma, min_angle = quality["gamma"], quality["min_angle"]
+  num_faces = len(gamma)
+
+  def worst(values: np.ndarray) -> float:
+    finite = values[np.isfinite(values)]
+    return float(finite.min()) if finite.size else float("nan")
+
+  worst_gamma, smallest_angle = worst(gamma), worst(min_angle)
+  degenerate = not (np.isfinite(gamma).all() and np.isfinite(min_angle).all())
+  poor_percent = float(100 * (~(gamma >= POOR_GAMMA)).mean()) if num_faces else float("nan")
+  inverted = int((quality["volume_length"] < 0).sum())
   checks = {
-    "min_gamma": ("Worst gamma", worst_gamma, ">=", targets.min_gamma, worst_gamma >= targets.min_gamma),
+    "min_gamma": (
+      "Worst gamma (of the non-degenerate faces)",
+      worst_gamma,
+      ">=",
+      targets.min_gamma,
+      num_faces > 0 and not degenerate and worst_gamma >= targets.min_gamma,
+    ),
     "max_percent_poor": (
       f"Percentage of faces with gamma < {POOR_GAMMA:g}",
       poor_percent,
-      "<",
+      "<=",
       targets.max_percent_poor,
-      poor_percent < targets.max_percent_poor,
+      num_faces > 0 and poor_percent <= targets.max_percent_poor,
     ),
     "min_angle": (
-      "Smallest angle (degrees)",
+      "Smallest angle (degrees, of the non-degenerate faces)",
       smallest_angle,
       ">=",
       targets.min_angle,
-      smallest_angle >= targets.min_angle,
+      num_faces > 0 and not degenerate and smallest_angle >= targets.min_angle,
     ),
+    "no_inverted": ("Inverted faces (normal towards the Earth's centre)", inverted, "==", 0, inverted == 0),
   }
   result: dict[str, Any] = {
     name: described(description, {"value": value, "comparison": comparison, "target": target, "passed": bool(passed)})

@@ -197,14 +197,20 @@ def coverage_table(coverage: list[dict[str, Any]], graphs: dict[str, Any]) -> Ta
 
 
 def quality_shares_table(name: str, triangles: dict[str, Any]) -> Table:
-  """Faces beyond the quality thresholds, and where the poor ones are (percentages of the poor faces)."""
-  table = _table(f"Poor triangles of {name}", ["", "faces", "%"])
+  """Faces beyond the quality thresholds (percentages of all faces)."""
+  table = _table(f"Poor triangles of {name}", ["", "faces", "% of all faces"])
   for key, entry in triangles["thresholds"].items():
     if key != "description":
       table.add_row(entry["description"], _format(entry["count"]), _format(entry["percent"]))
+  return table
+
+
+def poor_locations_table(name: str, triangles: dict[str, Any]) -> Table:
+  """Where the poor faces are (percentages of the poor faces, not of all faces)."""
+  table = _table(f"Where the poor triangles of {name} are", ["", "faces", "% of the poor faces"])
   for key, entry in triangles["poor_faces"].items():
     if key != "description":
-      table.add_row(entry["description"], _format(entry["count"]), _format(entry["percent"]))
+      table.add_row(key.replace("_", " "), _format(entry["count"]), _format(entry["percent"]))
   return table
 
 
@@ -243,4 +249,5 @@ def print_summary(results: dict[str, Any], console: Console) -> None:
       title = f"Triangle quality of {name} ({faces} faces, {inverted} inverted)"
       console.print(summary_table(title, [(key, triangles[key]) for key in TRIANGLE_QUALITY]))
       console.print(quality_shares_table(name, triangles))
+      console.print(poor_locations_table(name, triangles))
   console.print(quality_targets_table(graphs))

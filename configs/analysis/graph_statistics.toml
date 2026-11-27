@@ -25,16 +25,16 @@ small_component_max_faces = 3
 path = "/data/geometry/uniform_50km.msh"
 message_passing_steps = 16
 
-# Squashed grid-to-grid graph (mobydick.graph_statistics.squashed): grid node i -> j when the input at i reaches the
-# output at j through the encoders, the message passing steps and the decoders. Grid nodes sampled as senders and
-# receivers; geodesic lengths of at most max_targets edges per sampled node; nodes propagated together (dense boolean
-# blocks of batch_size × grid nodes).
 # Pass/fail targets for the triangles of every processor mesh (no target on node degrees).
 [quality_targets]
 min_gamma = 0.4
 max_percent_poor = 1.0
 min_angle = 15.0
 
+# Squashed grid-to-grid graph (mobydick.graph_statistics.squashed): grid node i -> j when the input at i reaches the
+# output at j through the encoders, the message passing steps and the decoders. Grid nodes sampled as senders and
+# receivers; geodesic lengths of at most max_targets edges per sampled node; nodes propagated together (dense boolean
+# blocks of batch_size × grid nodes).
 [squashed]
 num_sources = 1024
 max_targets = 4096

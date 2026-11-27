@@ -395,6 +395,32 @@ def test_threshold_shares_poor_locations_and_targets():
   assert geometry.triangle_statistics(graph, 20, lenient)["targets"]["passed"]["value"]
 
 
+def test_degenerate_and_inverted_faces_fail_the_targets():
+  """A face with two coincident vertices (NaN gamma and angles) counts as poor and below every threshold, and fails the
+  worst-gamma and smallest-angle targets, whose values are those of the other faces; an inverted face fails the
+  target of its own. A share limit of 100 % accepts a mesh whose faces are all poor."""
+  vertices, faces = _strip(3, 3)
+  degenerate = np.concatenate([faces, [[0, 0, 1]]])
+  stats = geometry.triangle_statistics(_mesh(vertices, degenerate), 20)
+  targets = stats["targets"]
+  assert not targets["min_gamma"]["passed"] and not targets["min_angle"]["passed"]
+  assert np.isfinite(targets["min_gamma"]["value"]) and targets["min_gamma"]["value"] > 0.8
+  for name in geometry.QUALITY_THRESHOLDS:
+    if name != "max_angle_above_90":
+      assert stats["thresholds"][name]["count"] == 1, name
+  assert stats["poor_faces"]["touching_boundary"]["count"] == 1
+  inverted = faces.copy()
+  inverted[4] = inverted[4, ::-1]
+  targets = geometry.triangle_statistics(_mesh(vertices, inverted), 20)["targets"]
+  assert targets["no_inverted"]["value"] == 1 and not targets["no_inverted"]["passed"]
+  assert not targets["passed"]["value"] and targets["min_gamma"]["passed"]
+  # Flatten every cell: all faces poor, accepted only by a 100 % limit.
+  flat = vertices * np.array([1.0, 1.0, 0.0]) + np.array([0.0, 0.0, 1.0]) * vertices[:, 2:] * 0.2
+  lenient = config.QualityTargetsConfig(min_gamma=0.0, max_percent_poor=100.0, min_angle=0.0)
+  share = geometry.triangle_statistics(_mesh(flat, faces), 20, lenient)["targets"]["max_percent_poor"]
+  assert share["value"] == 100.0 and share["passed"]
+
+
 def test_small_components_are_listed_and_logged(caplog):
   """A lone triangle far from the main patch (an enclosed sea meshed as one element) is a component of one face: it is
   listed with its position and logged as a warning; the patch itself is not."""
@@ -452,7 +478,13 @@ def test_cli_prints_tables_and_writes_described_statistics(mask_path, tmp_path, 
     "Squashed",
     "Basin connectivity",
   ]
-  for title in [*titles, "Triangle quality of mesh_0", "Poor triangles of mesh_0", "Quality targets"]:
+  for title in [
+    *titles,
+    "Triangle quality of mesh_0",
+    "Poor triangles of mesh_0",
+    "Where the poor triangles of mesh_0 are",
+    "Quality targets",
+  ]:
     assert title in result.output
 
   def reject(constant):

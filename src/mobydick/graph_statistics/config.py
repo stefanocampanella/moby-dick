@@ -83,7 +83,7 @@ class QualityTargetsConfig(BaseModel):
 
   min_gamma: float = Field(default=0.4, ge=0.0, le=1.0, description="Smallest acceptable gamma of any face")
   max_percent_poor: float = Field(
-    default=1.0, ge=0.0, le=100.0, description="Percentage of faces with gamma < 0.8 must be below this"
+    default=1.0, ge=0.0, le=100.0, description="Largest acceptable percentage of faces with gamma < 0.8"
   )
   min_angle: float = Field(default=15.0, ge=0.0, le=60.0, description="Smallest acceptable angle of any face (degrees)")
 
