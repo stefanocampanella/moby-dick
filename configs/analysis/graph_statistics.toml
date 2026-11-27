@@ -14,6 +14,9 @@ num_sources = 32
 seed = 0
 length_bin_width_km = 5.0
 quality_bins = 20
+# Processor components of at most this many faces are listed and logged as warnings (an enclosed sea meshed as one
+# triangle at a coarse resolution).
+small_component_max_faces = 3
 
 # The model's meshes, finest first: one, or a hierarchy (a V-cycle with message_passing_steps on each mesh on the way
 # down; each decoder adds the coarser mesh's result to the finer mesh's state on the way up). Repeat the table for
@@ -26,6 +29,12 @@ message_passing_steps = 16
 # output at j through the encoders, the message passing steps and the decoders. Grid nodes sampled as senders and
 # receivers; geodesic lengths of at most max_targets edges per sampled node; nodes propagated together (dense boolean
 # blocks of batch_size × grid nodes).
+# Pass/fail targets for the triangles of every processor mesh (no target on node degrees).
+[quality_targets]
+min_gamma = 0.4
+max_percent_poor = 1.0
+min_angle = 15.0
+
 [squashed]
 num_sources = 1024
 max_targets = 4096

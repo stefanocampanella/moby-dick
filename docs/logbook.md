@@ -1754,3 +1754,17 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - ruff and ty exclude the submodules.
 - **Fix:** the tests found that `mesh_study.sh` read a case's time limit into `SECONDS`, bash's seconds counter. So
   `06:00:00` became `06:00:0`, or one second more if a second had passed. The variable is now `SECS`.
+
+## 2026-11-27 17:30: mesh quality targets in graph-statistics
+
+- **Request:** the quality additions of the seamsh notes, without the degree-6 target (too strict). Basins meshed as
+  a single triangle must at least warn: later refactorings may not support them.
+- **Change:**
+  - `radius_ratio` is now `gamma`, the name gmsh and seamsh use for the same quantity.
+  - Every processor's `triangles` gains the shares of faces beyond thresholds and the location of the faces with
+    gamma < 0.8 (touching the boundary, one row in, deeper), from the new `mesh_graph.boundary_vertices` and
+    `face_rows_from_boundary`.
+  - Pass/fail against `[quality_targets]` (worst gamma ≥ 0.4, under 1 % of faces below 0.8, smallest angle ≥ 15°),
+    as two new tables.
+  - The connected components of at most `small_component_max_faces` faces (default 3, from
+    `mesh_graph.small_components`) are listed with their position and logged as warnings.

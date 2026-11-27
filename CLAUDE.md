@@ -56,7 +56,13 @@ NVIDIA JAX container `nvcr.io/nvidia/jax:26.09-py3` plus GDAL/PROJ from Spack). 
   degrees; decoders: the 3-edges-per-receiver check; processors: degrees, density, one-way edges, connected
   components with, per component, the diameter (2-sweep lower bound) and shortest path lengths from `num_sources`
   sampled nodes (0 = exact), from the same sources the geodesic distances and the path lengths along the mesh in km
-  (scipy Dijkstra) and their ratio (detour), and triangle quality (aspect ratio, radius ratio, volume-length, angles, edge ratio);
+  (scipy Dijkstra) and their ratio (detour), and triangle quality (aspect ratio, `gamma` = 2 × inradius /
+  circumradius as in gmsh and seamsh's tests, `radius_ratio` until 27 Nov 2026, volume-length, angles, edge ratio),
+  with the shares of faces beyond thresholds (gamma < 0.5 and < 0.8, smallest angle < 15° and < 30°, largest > 90°),
+  where the faces with gamma < 0.8 are (touching the boundary, one row in, deeper), pass/fail against
+  `[quality_targets]` (agreed 12 Nov 2026 for 25–400 km: worst gamma ≥ 0.4, under 1 % of faces below 0.8, smallest
+  angle ≥ 15°; the degree-6 target was dropped as too strict), and the components of at most
+  `small_component_max_faces` faces, each logged as a warning (an enclosed sea meshed as one triangle);
   coverage of each pair of levels; the squashed grid-to-grid graph (`[squashed]`; i → j when the input at i reaches
   the output at j through encoders, steps and decoders; a hierarchy is a V-cycle, as the planned hierarchical
   processor: steps on each mesh on the way down, then each decoder ORs the coarser result into the finer mesh's state

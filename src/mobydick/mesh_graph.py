@@ -27,11 +27,14 @@ from collections.abc import Sequence
 import chex
 import networkx as nx
 import numpy as np
+from scipy import sparse
+from scipy.sparse import csgraph
 
 from mobydick import typed_graph
 from mobydick.gis_utils import (
   _cartesian_wkt,
   cartesian_to_lat_lon,
+  lat_lon_to_cartesian,
 )
 
 
@@ -244,6 +247,76 @@ def longest_incident_edges(vertices: np.ndarray, faces: np.ndarray) -> np.ndarra
   np.maximum.at(longest, senders, lengths)
   np.maximum.at(longest, receivers, lengths)
   return longest
+
+
+def boundary_vertices(faces: np.ndarray, num_vertices: int) -> np.ndarray:
+  """Whether each vertex is on the boundary of the triangulation: an endpoint of an edge that belongs to one face only
+  (the coastline of an ocean mesh; none on a closed mesh). Computed from the faces, so it does not depend on the
+  boundary lines a mesh file stores."""
+  faces = np.asarray(faces)
+  edges = np.sort(np.stack([faces.reshape(-1), np.roll(faces, -1, axis=1).reshape(-1)], axis=1), axis=1)
+  unique, counts = np.unique(edges, axis=0, return_counts=True)
+  boundary = np.zeros(num_vertices, dtype=bool)
+  boundary[unique[counts == 1].reshape(-1)] = True
+  return boundary
+
+
+def face_rows_from_boundary(faces: np.ndarray, num_vertices: int) -> np.ndarray:
+  """Distance of each face from the boundary in rows of faces: 0 for a face with a vertex on the boundary
+  (`boundary_vertices`), 1 for a face sharing a vertex with a row-0 face, 2 for any deeper face."""
+  faces = np.asarray(faces)
+  on_boundary = boundary_vertices(faces, num_vertices)
+  rows = np.full(len(faces), 2, dtype=np.int8)
+  row0 = on_boundary[faces].any(axis=1)
+  rows[row0] = 0
+  near = np.zeros(num_vertices, dtype=bool)
+  near[faces[row0].reshape(-1)] = True
+  rows[~row0 & near[faces].any(axis=1)] = 1
+  return rows
+
+
+def face_components(faces: np.ndarray, num_vertices: int) -> tuple[int, np.ndarray]:
+  """Connected components of a triangulation (faces sharing a vertex belong to the same one): their number and the
+  component of each vertex. Vertices in no face are components of their own."""
+  faces = np.asarray(faces)
+  senders, receivers = faces.reshape(-1), np.roll(faces, -1, axis=1).reshape(-1)
+  adjacency = sparse.coo_matrix(
+    (np.ones(len(senders), dtype=np.int8), (senders, receivers)), shape=(num_vertices, num_vertices)
+  )
+  count, labels = csgraph.connected_components(adjacency, directed=False)
+  return int(count), labels
+
+
+def small_components(vertices: np.ndarray, faces: np.ndarray, max_faces: int) -> list[dict[str, float | int]]:
+  """The connected components of a triangulation with at most `max_faces` faces, e.g. an enclosed sea meshed as one
+  triangle at a coarse resolution: faces, vertices, and the latitude and longitude (degrees) of their mean vertex
+  position, largest first.
+
+  Args:
+    vertices: Earth-centred coordinates [num_vertices, 3] (metres).
+    faces: Vertex indices [num_faces, 3].
+    max_faces: Largest number of faces of a component reported.
+  """
+  faces, vertices = np.asarray(faces), np.asarray(vertices, np.float64)
+  _, labels = face_components(faces, len(vertices))
+  faces_per_component = np.bincount(labels[faces[:, 0]], minlength=labels.max(initial=0) + 1)
+  vertices_per_component = np.bincount(labels, minlength=len(faces_per_component))
+  small = np.flatnonzero((faces_per_component > 0) & (faces_per_component <= max_faces))
+  result = []
+  for component in sorted(small, key=lambda c: (-faces_per_component[c], c)):
+    # The mean direction of the vertices on the unit sphere, normalised (the mean of points is inside the Earth).
+    lat, lon = cartesian_to_lat_lon(vertices[labels == component])
+    centre = lat_lon_to_cartesian(lat, lon, unit_sphere=True).mean(axis=0)
+    lat, lon = cartesian_to_lat_lon(centre / np.linalg.norm(centre), unit_sphere=True)
+    result.append(
+      {
+        "faces": int(faces_per_component[component]),
+        "vertices": int(vertices_per_component[component]),
+        "lat": float(lat),
+        "lon": float(lon),
+      }
+    )
+  return result
 
 
 def _get_undirected_edges(edges: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
