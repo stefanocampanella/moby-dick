@@ -250,3 +250,12 @@ def test_grid_basis_interpolates_a_function_given_at_the_mesh_vertices(mask):
   assert errors[-1] < 1e-2
   ratios = np.array(errors[:-1]) / np.array(errors[1:])
   assert np.all((ratios > 3.0) & (ratios < 5.5)), (errors, ratios)
+
+
+def test_points_closest_to_a_degenerate_face_get_its_nearest_vertex():
+  """A face of zero area has no barycentric coordinates: a point closest to it gets weight 1 on the face's vertex
+  nearest to it, instead of NaN weights (which an interpolating decoder would spread)."""
+  vertices = np.array([[0.0, 0.0, 0.0], [1e5, 0.0, 0.0], [2e5, 0.0, 0.0]])
+  mesh = TriangleMesh(vertices=vertices, faces=np.array([[0, 1, 2]]))
+  _, weights, _ = basis_utils.barycentric_coordinates(mesh, np.array([[1.9e5, 1e3, 0.0]]))
+  np.testing.assert_array_equal(weights, [[0.0, 0.0, 1.0]])

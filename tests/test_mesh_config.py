@@ -399,13 +399,13 @@ def test_the_size_fields_are_written_at_every_node(coastline):
 
 
 def test_the_msh_option_writes_the_mesh_for_gmsh(coastline):
-  """--msh also writes the mesh in gmsh's format, for looking at it in gmsh, with the same triangles."""
+  """--msh also writes the mesh in gmsh's format, for looking at it in gmsh, with its license and description."""
   config = _write_config(coastline / "mesh.toml")
   output, msh = coastline / "mesh.nc", coastline / "mesh.msh"
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--msh", str(msh), "--log-level", "warning"])
   assert result.exit_code == 0, result.output
   text = msh.read_text()
-  assert "$Nodes" in text and "$Elements" in text
+  assert "$Nodes" in text and "$Elements" in text and "A test license" in text
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(coastline / "other.nc"), "--msh", str(msh)])
   assert result.exit_code != 0 and "--overwrite" in result.output
 

@@ -41,10 +41,19 @@ def barycentric_coordinates(mesh: Mesh, points: np.ndarray) -> tuple[np.ndarray,
   # Without processing, trimesh keeps the order of the faces (it would merge vertices and drop degenerate faces).
   surface = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=False)
   closest, distances, face_indices = trimesh.proximity.closest_point(surface, points)
-  weights = trimesh.triangles.points_to_barycentric(mesh.vertices[mesh.faces[face_indices]], closest)
+  # Degenerate faces divide by zero (handled below).
+  with np.errstate(divide="ignore", invalid="ignore"):
+    weights = trimesh.triangles.points_to_barycentric(mesh.vertices[mesh.faces[face_indices]], closest)
   # A closest point on an edge or a vertex can get weights a rounding error below zero.
   weights = np.clip(weights, 0.0, None)
   weights /= weights.sum(axis=1, keepdims=True)
+  # A degenerate face (zero area) has no barycentric coordinates (NaN): all the weight on its vertex nearest the point.
+  if not (finite := np.isfinite(weights).all(axis=1)).all():
+    rows = np.flatnonzero(~finite)
+    corners = mesh.vertices[mesh.faces[face_indices[rows]]]
+    nearest = np.linalg.norm(corners - points[rows, None, :], axis=-1).argmin(axis=1)
+    weights[rows] = np.eye(3)[nearest]
+    logger.warning(f"{len(rows)} point(s) closest to degenerate faces: weight 1 on the face's nearest vertex")
   return np.asarray(face_indices), weights, np.asarray(distances)
 
 

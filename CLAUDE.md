@@ -611,8 +611,8 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
     process failed with a `KeyError`; it calls `gmsh.clear()` first.
 - **Naming:** uniform meshes are named by their target size in km (`uniform_120km` was `uniform_coarse` until 30 Oct
   2026; the `uniform_coarse.msh` and `uniform_fine.msh` symlinks to the new names were removed on 8 Nov 2026). Each
-  `.msh` stores the size field it was made with (views `MeshSize` and one per field) and
-  the config's description. Measured median edge lengths match the targets: 117.8 km for 120 km, 34.9 for 35, 30.0
+  mesh file stores the size fields it was made with (`mesh_size` and `size_<field>`; the old `.msh` files: views
+  `MeshSize` and one per field) and the config's description. Measured median edge lengths match the targets: 117.8 km for 120 km, 34.9 for 35, 30.0
   for 30.
 - **The 25 km mesh** (`uniform_25km`, formerly `uniform_fine`, 704,078 nodes, 31 Jan 2026):
   - its stored size field is 25 km at every node, and its median edge is 25.0 km;
@@ -643,7 +643,8 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
   so a second basin could not be meshed anyway. Natural Earth's coastline counts ice shelves as ocean. Mesh files
   hold nodes in no triangle: the outlines of islands smaller than the mesh size, which survive the coarsening but are
   covered by triangles (743 of 34,750 nodes at 120 km, 632 islands up to ~100 km across; 655 of 181,980 at 50 km);
-  `read_mesh` drops them and logs how many (since 11 Nov 2026). A
+  `read_mesh` dropped them and logged how many (11–27 Nov 2026; the `.msh` reader is gone, and `make-ocean-mesh`
+  writes the nodes of the triangles only). A
   refactoring of seamsh (tests, hooks, fixes, several seeds and one surface per basin) is prepared in a separate PR to
   the fork's `develop`: kit with PR guide, notes (bugs with line numbers), validation script, reference results, data
   and moby-dick's mesh code in `$PROJECT/claude-work/ed336b51-7c1c-4db2-b3ca-b6880ad836fd/seamsh-refactoring-kit{,.tar.gz}` (copy it out before this session's directory is deleted). The script reproduces

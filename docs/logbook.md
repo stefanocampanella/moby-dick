@@ -1815,3 +1815,37 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - The configs, `mesh_study.sh` and JUBE name `.nc` files (`summarize.py` reads both).
 - **To do on JUPITER:** regenerate the meshes as `.nc`, with the image rebuilt for h5netcdf. Until then
   `APPTAINERENV_PYTHONPATH` sources fail on `import h5netcdf`.
+
+## 2026-11-27 19:30: high-effort code reviews of the four PRs
+
+- **Request:** run `/code-review high` on every PR of the stack, the earlier ones included. Publish the planned PRs
+  on the maintainer's behalf, for review at the end as a stack.
+- **#9 (laptop, gitleaks, bats):**
+  - The stand-ins joined their arguments with `$*`, which hid split arguments: they now quote each one with
+    `printf %q`.
+  - Lmod's exported `module` function would have won over the stand-in on JUPITER login nodes: `common_setup` now
+    removes it.
+  - The test without Apptainer found a system Apptainer in /usr/bin: its PATH now has links to bash and getopt only.
+  - The bats hook says how to get the submodules. The CI job fails if any test is skipped.
+  - The sharding tolerance is loosened on macOS only.
+- **#10 (quality targets):**
+  - Degenerate faces (NaN) count as poor and fail the targets.
+  - A target of no inverted faces.
+  - `max_percent_poor` compares with `<=`.
+  - The locations of the poor faces get a table of their own.
+  - Positions name their hemispheres, and `small_component_max_faces = 0` turns the check off.
+- **#11 (seeds), important:** equirectangular seeds were (longitude, latitude), while the `point_refinement` points
+  of the same section are (latitude, longitude), so a strait copied into the seeds landed on land. Seeds are now
+  (latitude, longitude), range-checked, and swapped for seamsh. Also:
+  - `x0_projection` is stereographic or equirectangular;
+  - every piece of the mesh is logged at INFO, since a seed on land gives no warning;
+  - the two-seed test checks the specific messages.
+- **#12 (UGRID):**
+  - Descriptions and licenses round-trip as lists of strings; joining them on line breaks split TOML multi-line
+    strings.
+  - UGRID's `edge_node_connectivity` holds the faces' edges once each; the processor's directed edges are in
+    `mesh<l>_processor_edges`.
+  - Only WGS84 Earth-centred meshes are written.
+  - `--msh` keeps the license and description.
+  - Points closest to a degenerate face get weight 1 on its nearest vertex instead of NaN.
+  - Stale CLAUDE.md bullets are updated.

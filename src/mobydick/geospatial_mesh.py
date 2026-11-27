@@ -221,5 +221,9 @@ def write_ocean_mesh(
   write_mesh_file(output_path, [mesh], [fields])
   if msh_path is not None:
     logger.info(f"Writing the mesh in gmsh's format to {msh_path}")
+    if configs.license:
+      gmsh.model.setAttribute("license", [configs.license])
+    if configs.description:
+      gmsh.model.setAttribute("description", [configs.description])
     msh_path.parent.mkdir(parents=True, exist_ok=True)
     gmsh.write(str(msh_path))

@@ -20,14 +20,16 @@ attributes, so the files open in tools that read it (xugrid, uxarray, QGIS, Para
 hierarchy, finest first, each mesh a topology of its own named `mesh<level>`, with dimensions and variables prefixed
 by that name:
 
-- `mesh<l>`: the topology variable (`cf_role = "mesh_topology"`), with the mesh's `description` and `license`;
+- `mesh<l>`: the topology variable (`cf_role = "mesh_topology"`), with the mesh's `description` and `license` (lists
+  of strings, as `MeshData` has them);
 - `mesh<l>_node_lon`, `mesh<l>_node_lat`: geodetic longitude and latitude of the nodes on WGS84 (degrees), the
   UGRID node coordinates for other tools;
 - `mesh<l>_node_x`, `_y`, `_z`: the node coordinates the model uses, Earth-centred metres in the system of
   `mesh<l>_crs` (its `crs_wkt`), read back as written;
-- `mesh<l>_face_nodes` [faces, 3] and `mesh<l>_edge_nodes` [edges, 2] (start index 0): the triangles and the
-  processor's directed edges, sender first (both directions of every face edge, or the multi-mesh's edges of all
-  levels);
+- `mesh<l>_face_nodes` [faces, 3] and `mesh<l>_edge_nodes` [edges, 2] (start index 0): the triangles and their
+  edges, each once (UGRID's face and edge connectivity, which other tools read);
+- `mesh<l>_processor_edges` [processor edges, 2]: the processor's directed edges, sender first (both directions of
+  every face edge, or the multi-mesh's edges of all levels), outside the UGRID topology;
 - `mesh<l>_boundary`: 1 at the nodes of the boundary (the coastline), when the mesh has one;
 - `mesh<l>_mesh_size` and `mesh<l>_size_<field>`: the target mesh size (the minimum of the fields) and each size
   field at the nodes (metres).
@@ -46,11 +48,12 @@ from collections.abc import Mapping, Sequence
 
 import click
 import numpy as np
+import pyproj
 import xarray as xr
 
 from mobydick import cli_utils
 from mobydick.basis_utils import barycentric_coordinates
-from mobydick.gis_utils import cartesian_to_lat_lon
+from mobydick.gis_utils import cartesian_crs, cartesian_to_lat_lon
 from mobydick.mesh_graph import MeshData, MeshGraph
 
 logger = logging.getLogger(__name__)
@@ -78,11 +81,21 @@ def mesh_dataset(mesh: MeshData, level: int = 0, size_fields: Mapping[str, np.nd
   """
   name = level_name(level)
   graph = mesh.mesh_graph
+  if pyproj.CRS(graph.spatial_reference_system) != pyproj.CRS(cartesian_crs.to_wkt()):
+    raise ValueError(
+      f"Mesh of level {level}: mesh files hold Earth-centred WGS84 coordinates (metres), not "
+      f"{pyproj.CRS(graph.spatial_reference_system).name}"
+    )
   vertices = np.asarray(graph.vertices, dtype=np.float64)
   faces = np.asarray(graph.faces, dtype=np.int32)
   senders, receivers = graph.edges
-  edges = np.stack([np.asarray(senders), np.asarray(receivers)], axis=1).astype(np.int32)
+  processor_edges = np.stack([np.asarray(senders), np.asarray(receivers)], axis=1).astype(np.int32)
+  # Every edge of the faces once, for UGRID (undirected).
+  face_edges = np.sort(np.stack([faces.reshape(-1), np.roll(faces, -1, axis=1).reshape(-1)], axis=1), axis=1)
+  edges = np.unique(face_edges, axis=0).astype(np.int32) if len(face_edges) else np.empty((0, 2), np.int32)
   nodes, face_dim, edge_dim = f"{name}_nNodes", f"{name}_nFaces", f"{name}_nEdges"
+  # Lists of strings; an empty one is left out (netCDF would store it as an empty number array).
+  texts = {key: list(value) for key, value in (("description", mesh.description), ("license", mesh.license)) if value}
   lat, lon = cartesian_to_lat_lon(vertices) if len(vertices) else (np.empty(0), np.empty(0))
   crs = f"{name}_crs"
   variables: dict[str, xr.Variable] = {
@@ -98,8 +111,7 @@ def mesh_dataset(mesh: MeshData, level: int = 0, size_fields: Mapping[str, np.nd
         "edge_node_connectivity": f"{name}_edge_nodes",
         "face_dimension": face_dim,
         "edge_dimension": edge_dim,
-        "description": "\n".join(mesh.description),
-        "license": "\n".join(mesh.license),
+        **texts,
       },
     ),
     crs: xr.Variable((), np.int32(0), {"crs_wkt": graph.spatial_reference_system}),
@@ -117,11 +129,12 @@ def mesh_dataset(mesh: MeshData, level: int = 0, size_fields: Mapping[str, np.nd
     f"{name}_edge_nodes": xr.Variable(
       (edge_dim, "Two"),
       edges,
-      {
-        "cf_role": "edge_node_connectivity",
-        "start_index": np.int32(0),
-        "long_name": "Directed edges of the processor, sender then receiver",
-      },
+      {"cf_role": "edge_node_connectivity", "start_index": np.int32(0), "long_name": "Edges of the triangles"},
+    ),
+    f"{name}_processor_edges": xr.Variable(
+      (f"{name}_nProcessorEdges", "Two"),
+      processor_edges,
+      {"long_name": "Directed edges of the processor, sender then receiver (start index 0)", "mesh": name},
     ),
   }
   for axis, column in zip("xyz", vertices.T, strict=True):
@@ -232,7 +245,7 @@ def read_mesh_file(path: pathlib.Path | str, level: int = 0) -> MeshData:
       raise ValueError(f"{path} has no mesh of level {level} ({int(dataset.attrs.get('levels', 0))} levels)")
     topology = dataset[name].attrs
     vertices = np.stack([dataset[f"{name}_node_{axis}"].values for axis in "xyz"], axis=1)
-    edges = dataset[f"{name}_edge_nodes"].values.astype(np.int64)
+    edges = dataset[f"{name}_processor_edges"].values.astype(np.int64)
     boundary = dataset[f"{name}_boundary"].values.astype(bool) if f"{name}_boundary" in dataset else None
     mesh_size = dataset[f"{name}_mesh_size"].values if f"{name}_mesh_size" in dataset else None
     graph = MeshGraph(
@@ -243,15 +256,18 @@ def read_mesh_file(path: pathlib.Path | str, level: int = 0) -> MeshData:
       spatial_reference_system=str(dataset[f"{name}_crs"].attrs["crs_wkt"]),
     )
 
-  def lines(text: str) -> list[str]:
-    return text.split("\n") if text else []
+  def strings(value: object) -> list[str]:
+    # netCDF reads a list of one string back as a string.
+    if isinstance(value, str):
+      return [value]
+    return [str(item) for item in value] if isinstance(value, (list, tuple)) else []
 
   logger.info(f"{name}: {len(vertices):,} nodes, {len(graph.faces):,} faces, {len(edges):,} edges")
   return MeshData(
     mesh_graph=graph,
     mesh_size=mesh_size,
-    description=lines(str(topology.get("description", ""))),
-    license=lines(str(topology.get("license", ""))),
+    description=strings(topology.get("description")),
+    license=strings(topology.get("license")),
   )
 
 

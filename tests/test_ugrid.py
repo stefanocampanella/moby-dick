@@ -23,13 +23,16 @@ import xarray as xr
 from click.testing import CliRunner
 
 from mobydick import icosahedral_mesh, ugrid
-from mobydick.gis_utils import cartesian_to_lat_lon
+from mobydick.gis_utils import cartesian_to_lat_lon, cartesian_unit_sphere_crs
 from mobydick.mesh_graph import MeshData, boundary_vertices, faces_to_edges
 
 
 def _ocean_like(splits: int = 2) -> MeshData:
   """An icosahedral mesh with its northern cap removed: an open mesh with a boundary, like an ocean mesh."""
-  mesh = icosahedral_mesh.get_multi_mesh_data(splits, description=["A mesh", "on two lines"], license=["A license"])
+  # Entries as TOML multi-line strings give them, with line breaks inside.
+  mesh = icosahedral_mesh.get_multi_mesh_data(
+    splits, description=["  A mesh\n  on two lines\n  ", "second"], license=["A license\n"]
+  )
   graph = mesh.mesh_graph
   lat, _ = cartesian_to_lat_lon(graph.vertices)
   keep = (lat[graph.faces] < 60.0).all(axis=1)
@@ -50,7 +53,8 @@ def _ocean_like(splits: int = 2) -> MeshData:
 
 def test_a_mesh_reads_back_as_written(tmp_path):
   """Every array of a mesh comes back unchanged (vertices bit for bit, faces, directed edges, boundary, mesh size,
-  size fields), with its spatial reference system, description and license (one entry per line)."""
+  size fields), with its spatial reference system, description and license (lists of strings, line breaks
+  included)."""
   mesh = _ocean_like()
   fields = {"uniform": np.full(len(mesh.mesh_graph.vertices), 1e6), "shore_proximity": 2 * np.asarray(mesh.mesh_size)}
   path = tmp_path / "mesh.nc"
@@ -66,7 +70,7 @@ def test_a_mesh_reads_back_as_written(tmp_path):
   assert graph.spatial_reference_system == expected.spatial_reference_system
   assert read.mesh_size is not None and mesh.mesh_size is not None
   np.testing.assert_array_equal(read.mesh_size, mesh.mesh_size)
-  assert read.description == ["A mesh", "on two lines"] and read.license == ["A license"]
+  assert read.description == mesh.description and read.license == mesh.license
   sizes = ugrid.read_size_fields(path)
   assert set(sizes) == set(fields)
   for name, values in fields.items():
@@ -75,8 +79,9 @@ def test_a_mesh_reads_back_as_written(tmp_path):
 
 
 def test_the_file_follows_ugrid(tmp_path):
-  """The topology variable names the UGRID roles of the other variables, connectivity starts at 0, and the node
-  coordinates are the geodetic longitude and latitude of the nodes, so that UGRID tools can open the file."""
+  """The topology variable names the UGRID roles of the other variables, connectivity starts at 0, the UGRID edges are
+  the faces' edges once each (the processor's directed edges are a variable of their own), and the node coordinates
+  are the geodetic longitude and latitude of the nodes, so that UGRID tools can open the file."""
   mesh = _ocean_like()
   path = tmp_path / "mesh.nc"
   ugrid.write_mesh_file(path, [mesh])
@@ -89,6 +94,11 @@ def test_the_file_follows_ugrid(tmp_path):
       variable = dataset[topology[role]]
       assert variable.attrs["cf_role"] == role and variable.attrs["start_index"] == 0
     assert dataset[topology["face_node_connectivity"]].dims[0] == topology["face_dimension"]
+    edges = dataset[topology["edge_node_connectivity"]].values
+    assert len(edges) == len(mesh.mesh_graph.edges[0]) // 2 and len(np.unique(np.sort(edges, axis=1), axis=0)) == len(
+      edges
+    )
+    assert "mesh0_processor_edges" not in topology.values()
     lat, lon = cartesian_to_lat_lon(mesh.mesh_graph.vertices)
     np.testing.assert_allclose(dataset[lat_name].values, lat)
     np.testing.assert_allclose(dataset[lon_name].values, lon)
@@ -120,6 +130,15 @@ def test_a_hierarchy_holds_every_level_and_the_links_between_them(tmp_path):
   _, weights, distance = ugrid.read_links(path, 1, 0)
   np.testing.assert_allclose(distance, 0.0, atol=1e-3)
   np.testing.assert_allclose(weights.max(axis=1), 1.0, atol=1e-6)
+
+
+def test_only_earth_centred_metres_are_written(tmp_path):
+  """Mesh files hold WGS84 Earth-centred coordinates in metres (node lon/lat and the links are computed from them): a
+  mesh on the unit sphere is refused."""
+  graph = icosahedral_mesh.get_multi_mesh_graph(1, crs=cartesian_unit_sphere_crs)
+  mesh = MeshData(mesh_graph=graph, mesh_size=None, description=[], license=[])
+  with pytest.raises(ValueError, match="Earth-centred WGS84"):
+    ugrid.write_mesh_file(tmp_path / "unit.nc", [mesh])
 
 
 def test_missing_levels_and_links_are_errors(tmp_path):
