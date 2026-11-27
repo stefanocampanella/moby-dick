@@ -24,7 +24,7 @@ import abc
 import atexit
 import logging
 import pathlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any, Literal
 
 import gmsh
@@ -509,12 +509,13 @@ def load_domain(path: pathlib.Path, physical_name_field: str = "featurecla", cur
 def coarsen_boundaries(
   domain: seamsh.geometry.Domain,
   fields: Iterable[FieldConfig],
-  x0: tuple[float, float] = (0.0, 0.0),
+  x0: Sequence[tuple[float, float]] | tuple[float, float] = ((0.0, 0.0),),
   x0_projection_name: CRSName = "stereographic",
 ):
   """Creates a new Domain with the same projection and coarsened boundaries: resampled at the minimum of `fields`,
-  keeping the water reachable from x0 (see mesh_config.CoarsenBoundariesConfig). A single uniform field gives exactly
-  the coarsening of the configs with one size (the minimum of one field is that field)."""
+  keeping the water reachable from any point of x0 (one point or several, see mesh_config.CoarsenBoundariesConfig).
+  seamsh logs a warning for each point whose basin the coarsening loses. A single uniform field gives exactly the
+  coarsening of the configs with one size (the minimum of one field is that field)."""
   x0_projection = CRSRegistry[x0_projection_name]
   size = CompositeMeshSizeField(fields)
   return seamsh.geometry.coarsen_boundaries(domain, x0=x0, x0_projection=x0_projection, mesh_size=size)

@@ -16,7 +16,17 @@
 
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, NonNegativeFloat, NonNegativeInt, PositiveFloat, model_validator
+from pydantic import (
+  BaseModel,
+  ConfigDict,
+  Field,
+  NonNegativeFloat,
+  NonNegativeInt,
+  PositiveFloat,
+  PositiveInt,
+  field_validator,
+  model_validator,
+)
 
 from mobydick.gis_utils import CRSName
 
@@ -37,6 +47,16 @@ class GmshConfig(ApplicationConfig):
 
 class MesherConfig(ApplicationConfig):
   smoothness: PositiveFloat = Field(default=0.3, description="Gradation of the mesh size, passed to seamsh")
+  optimize: bool = Field(
+    default=True,
+    description="Optimize the triangles after meshing (gmsh's Relocate2D, seamsh.gmsh.mesh's default): node positions "
+    "change, the worst triangles improve",
+  )
+  small_component_max_faces: PositiveInt = Field(
+    default=3,
+    description="Connected components of the mesh with at most this many faces are logged as warnings (e.g. an "
+    "enclosed sea meshed as one triangle: lower the mesh size there to resolve it)",
+  )
 
 
 class DomainConfig(ApplicationConfig):
@@ -167,8 +187,26 @@ class CoarsenBoundariesConfig(ApplicationConfig):
   fields: list[FieldConfig] = Field(
     min_length=1, description="Size fields (e.g. uniform 10 km, point_refinement at straits), combined by the minimum"
   )
-  x0: tuple[float, float] = Field(default=(0.0, 0.0), description="A point inside the domain (the ocean)")
-  x0_projection: CRSName = "stereographic"
+  x0: list[tuple[float, float]] = Field(
+    default=[(0.0, 0.0)],
+    min_length=1,
+    description="Seeds: points inside the domain, one point or a list of points. The water reachable from any of them "
+    "is kept, so a seed in an enclosed sea keeps the sea (as a separate piece of the mesh when its straits close). A "
+    "seed on land meshes that land: the coastline is only a line",
+  )
+  x0_projection: CRSName = Field(
+    default="stereographic",
+    description="Coordinates of x0: stereographic metres (the North Pole is (0, 0)), or equirectangular, i.e. "
+    "(longitude, latitude) in degrees",
+  )
+
+  @field_validator("x0", mode="before")
+  @classmethod
+  def _one_point_is_a_list(cls, x0: Any) -> Any:
+    # A single point, (x, y), as before seamsh accepted several.
+    if isinstance(x0, (list, tuple)) and len(x0) == 2 and all(isinstance(c, (int, float)) for c in x0):
+      return [x0]
+    return x0
 
   @model_validator(mode="after")
   def check_field_names(self) -> Self:
