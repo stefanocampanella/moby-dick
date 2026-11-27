@@ -37,9 +37,18 @@ from rich.console import Console
 
 from mobydick import icosahedral_mesh, xarray_jax
 from mobydick.dataloader_utils import Grid
+from mobydick.gis_utils import lat_lon_to_cartesian
 from mobydick.graph_statistics import cli, config, geometry, graphs, quantities, regions, report, squashed, structure
 from mobydick.leviathan.model import Leviathan, ModelConfig, TaskConfig
-from mobydick.mesh_graph import longest_incident_edges
+from mobydick.mesh_graph import (
+  MeshGraph,
+  boundary_vertices,
+  face_rows_from_boundary,
+  faces_to_edges,
+  format_position,
+  longest_incident_edges,
+  small_components,
+)
 
 
 def _grid(ocean_below: float = 70.0) -> Grid:
@@ -297,7 +306,7 @@ def test_geodesic_lengths_on_the_ellipsoid():
 
 
 def test_triangle_quality_of_equilateral_and_degenerate_triangles():
-  """An equilateral triangle scores 1 in every metric and has 60° angles; a sliver scores close to 0 (radius ratio,
+  """An equilateral triangle scores 1 in every metric and has 60° angles; a sliver scores close to 0 (gamma,
   volume-length) or large (aspect ratio); reversing the orientation (normal towards the Earth's centre) makes the
   volume-length metric negative. `angle` has the three angles of every face."""
   r = 6.4e6
@@ -305,13 +314,13 @@ def test_triangle_quality_of_equilateral_and_degenerate_triangles():
   faces = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 1]])
   quality = geometry.triangle_quality(vertices, faces)
   assert set(quality) == set(geometry.TRIANGLE_QUALITY)
-  for name in ("aspect_ratio", "radius_ratio", "volume_length", "edge_ratio"):
+  for name in ("aspect_ratio", "gamma", "volume_length", "edge_ratio"):
     assert quality[name][0] == pytest.approx(1.0), name
   assert quality["min_angle"][0] == pytest.approx(60.0) and quality["max_angle"][0] == pytest.approx(60.0)
   assert quality["angle"].shape == (9,)
   np.testing.assert_allclose(quality["angle"].reshape(3, 3).sum(1), 180.0)
   assert quality["area_km2"][0] == pytest.approx(np.sqrt(3) / 4)
-  assert quality["radius_ratio"][1] < 0.01 and quality["volume_length"][1] < 0.01 and quality["aspect_ratio"][1] > 100
+  assert quality["gamma"][1] < 0.01 and quality["volume_length"][1] < 0.01 and quality["aspect_ratio"][1] > 100
   assert quality["volume_length"][2] == pytest.approx(-1.0)
 
 
@@ -321,8 +330,123 @@ def test_icosahedral_triangles_are_nearly_equilateral():
   mesh = icosahedral_mesh.get_multi_mesh_data(3).mesh_graph
   quality = geometry.triangle_quality(np.asarray(mesh.vertices, np.float64), np.asarray(mesh.faces))
   assert quality["volume_length"].min() > 0.9
-  assert quality["radius_ratio"].min() > 0.9
+  assert quality["gamma"].min() > 0.9
   assert quality["min_angle"].min() > 45
+
+
+def _strip(columns: int, rows: int) -> tuple[np.ndarray, np.ndarray]:
+  """A flat patch of (columns + 1) × (rows + 1) vertices 100 km apart near the equator, two triangles per cell: vertex
+  (i, j) is i + j (columns + 1)."""
+  i, j = np.meshgrid(np.arange(columns + 1), np.arange(rows + 1))
+  lat, lon = (0.9 * j).reshape(-1), (0.9 * i).reshape(-1)
+  vertices = lat_lon_to_cartesian(lat, lon)
+  faces = []
+  for row in range(rows):
+    for column in range(columns):
+      v = column + row * (columns + 1)
+      faces += [[v, v + 1, v + columns + 2], [v, v + columns + 2, v + columns + 1]]
+  return vertices, np.array(faces)
+
+
+def _mesh(vertices: np.ndarray, faces: np.ndarray) -> MeshGraph:
+  return MeshGraph(vertices=vertices, faces=faces, edges=faces_to_edges(faces))
+
+
+def test_boundary_vertices_and_rows_of_faces_from_the_boundary():
+  """On an open patch the boundary vertices are those of its outline (edges of one face only), the faces touching
+  them are row 0, those sharing a vertex with row 0 are row 1, and the inner ones deeper (2); a closed mesh has no
+  boundary, so all its faces are deeper."""
+  vertices, faces = _strip(6, 6)
+  boundary = boundary_vertices(faces, len(vertices))
+  i, j = np.arange(49) % 7, np.arange(49) // 7
+  np.testing.assert_array_equal(boundary, (i == 0) | (i == 6) | (j == 0) | (j == 6))
+  rows = face_rows_from_boundary(faces, len(vertices))
+  # Cells by their distance from the outline: 20 outer cells, 12 in the next ring, 4 inner ones.
+  assert np.bincount(rows).tolist() == [2 * 20, 2 * 12, 2 * 4]
+  closed = icosahedral_mesh.get_multi_mesh_data(1).mesh_graph
+  assert not boundary_vertices(closed.faces, len(closed.vertices)).any()
+  assert (face_rows_from_boundary(closed.faces, len(closed.vertices)) == 2).all()
+
+
+def test_threshold_shares_poor_locations_and_targets():
+  """A patch of right triangles (45° angles, gamma 0.83) passes the targets. Moving an inner vertex almost onto a
+  neighbour flattens its faces: the worst-gamma and smallest-angle targets fail, the faces count below the thresholds
+  they cross, and each poor face is located once, none of them at the boundary. Targets come from the settings."""
+  vertices, faces = _strip(6, 6)
+  stats = geometry.triangle_statistics(_mesh(vertices, faces), 20)
+  assert stats["targets"]["passed"]["value"]
+  assert stats["thresholds"]["gamma_below_0.8"]["count"] == 0
+  assert stats["thresholds"]["min_angle_below_30"]["count"] == 0
+  # Move vertex (2, 2), two rows from the outline, almost onto its diagonal neighbour (3, 3).
+  squeezed = vertices.copy()
+  v = 2 + 2 * 7
+  squeezed[v] = 0.98 * vertices[v + 8] + 0.02 * vertices[v]
+  stats = geometry.triangle_statistics(_mesh(squeezed, faces), 20)
+  targets = stats["targets"]
+  assert not targets["passed"]["value"]
+  assert not targets["min_gamma"]["passed"] and not targets["min_angle"]["passed"]
+  assert targets["min_gamma"]["value"] < 0.4 and targets["min_gamma"]["target"] == 0.4
+  poor = stats["thresholds"]["gamma_below_0.8"]["count"]
+  assert poor > 0 and stats["thresholds"]["gamma_below_0.5"]["count"] <= poor
+  located = stats["poor_faces"]
+  assert sum(located[name]["count"] for name in geometry.POOR_LOCATIONS.values()) == poor
+  assert located["touching_boundary"]["count"] == 0 and located["one_row_in"]["count"] > 0
+  lenient = config.QualityTargetsConfig(min_gamma=0.0, max_percent_poor=100.0, min_angle=0.0)
+  graph = _mesh(squeezed, faces)
+  assert geometry.triangle_statistics(graph, 20, lenient)["targets"]["passed"]["value"]
+
+
+def test_degenerate_and_inverted_faces_fail_the_targets():
+  """A face with two coincident vertices (NaN gamma and angles) counts as poor and below every threshold, and fails the
+  worst-gamma and smallest-angle targets, whose values are those of the other faces; an inverted face fails the
+  target of its own. A share limit of 100 % accepts a mesh whose faces are all poor."""
+  vertices, faces = _strip(3, 3)
+  degenerate = np.concatenate([faces, [[0, 0, 1]]])
+  stats = geometry.triangle_statistics(_mesh(vertices, degenerate), 20)
+  targets = stats["targets"]
+  assert not targets["min_gamma"]["passed"] and not targets["min_angle"]["passed"]
+  assert np.isfinite(targets["min_gamma"]["value"]) and targets["min_gamma"]["value"] > 0.8
+  for name in geometry.QUALITY_THRESHOLDS:
+    if name != "max_angle_above_90":
+      assert stats["thresholds"][name]["count"] == 1, name
+  assert stats["poor_faces"]["touching_boundary"]["count"] == 1
+  inverted = faces.copy()
+  inverted[4] = inverted[4, ::-1]
+  targets = geometry.triangle_statistics(_mesh(vertices, inverted), 20)["targets"]
+  assert targets["no_inverted"]["value"] == 1 and not targets["no_inverted"]["passed"]
+  assert not targets["passed"]["value"] and targets["min_gamma"]["passed"]
+  # Flatten every cell: all faces poor, accepted only by a 100 % limit.
+  flat = vertices * np.array([1.0, 1.0, 0.0]) + np.array([0.0, 0.0, 1.0]) * vertices[:, 2:] * 0.2
+  lenient = config.QualityTargetsConfig(min_gamma=0.0, max_percent_poor=100.0, min_angle=0.0)
+  share = geometry.triangle_statistics(_mesh(flat, faces), 20, lenient)["targets"]["max_percent_poor"]
+  assert share["value"] == 100.0 and share["passed"]
+
+
+def test_small_components_are_listed_and_logged(caplog):
+  """A lone triangle far from the main patch (an enclosed sea meshed as one element) is a component of one face: it is
+  listed with its position and logged as a warning; the patch itself is not."""
+  vertices, faces = _strip(4, 4)
+  lone = lat_lon_to_cartesian(np.array([43.0, 43.0, 43.9]), np.array([34.0, 35.0, 34.5]))
+  vertices = np.concatenate([vertices, lone])
+  faces = np.concatenate([faces, [[25, 26, 27]]])
+  with caplog.at_level("WARNING"):
+    stats = geometry.triangle_statistics(_mesh(vertices, faces), 20, name="mesh_1")
+  (component,) = stats["small_components"]["value"]
+  assert component["faces"] == 1 and component["vertices"] == 3
+  assert component["lat"] == pytest.approx(43.3, abs=0.05) and component["lon"] == pytest.approx(34.5, abs=0.05)
+  assert "mesh_1: a connected component of 1 face(s) and 3 vertices at 43.30° N, 34.50° E" in caplog.text
+  assert len(small_components(vertices, faces, 1000)) == 2
+  # 0 turns the check off.
+  assert (
+    geometry.triangle_statistics(_mesh(vertices, faces), 20, small_component_max_faces=0)["small_components"]["value"]
+    == []
+  )
+
+
+def test_positions_name_their_hemispheres():
+  """Positions in messages are absolute degrees with N/S and E/W, not signed degrees with fixed hemispheres."""
+  assert format_position(-20.0, -30.0) == "20.00° S, 30.00° W"
+  assert format_position(43.3, 34.5) == "43.30° N, 34.50° E"
 
 
 def test_cli_prints_tables_and_writes_described_statistics(mask_path, tmp_path, write_config):
@@ -366,7 +490,13 @@ def test_cli_prints_tables_and_writes_described_statistics(mask_path, tmp_path, 
     "Squashed",
     "Basin connectivity",
   ]
-  for title in [*titles, "Triangle quality of mesh_0"]:
+  for title in [
+    *titles,
+    "Triangle quality of mesh_0",
+    "Poor triangles of mesh_0",
+    "Where the poor triangles of mesh_0 are",
+    "Quality targets",
+  ]:
     assert title in result.output
 
   def reject(constant):
@@ -385,6 +515,8 @@ def test_cli_prints_tables_and_writes_described_statistics(mask_path, tmp_path, 
   assert stats["coverage"][0]["lower_in_decoder"]["percent"] == 100.0
   assert sum(processor["edge_length_km"]["histogram"]["counts"]) == processor["edges"]["value"]
   assert processor["triangles"]["inverted"]["value"] == 0
+  assert processor["triangles"]["targets"]["passed"]["value"]
+  assert processor["triangles"]["small_components"]["value"] == []
   assert stats["squashed"]["message_passing_steps"]["value"] == [1] and stats["squashed"]["out_degree"]["max"] > 0
   assert stats["settings"]["meshes"][0]["path"] == str(mesh_path)
   (halves,) = stats["basin_connections"]

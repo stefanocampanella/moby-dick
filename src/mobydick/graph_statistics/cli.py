@@ -85,7 +85,9 @@ def graph_statistics(graph: Graph, config: GraphStatisticsConfig, rng: np.random
   else:
     assert graph.mesh is not None
     stats.update(structure.processor_statistics(graph, config.num_sources, rng))
-    stats["triangles"] = geometry.triangle_statistics(graph.mesh, config.quality_bins)
+    stats["triangles"] = geometry.triangle_statistics(
+      graph.mesh, config.quality_bins, config.quality_targets, config.small_component_max_faces, graph.name
+    )
   lengths = geometry.edge_lengths_km(graph)
   # Bins of `length_bin_width_km` from 0 to past the longest edge.
   width = config.length_bin_width_km

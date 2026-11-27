@@ -75,6 +75,19 @@ class SquashedGraphConfig(BaseModel):
   )
 
 
+class QualityTargetsConfig(BaseModel):
+  """Targets for the triangles of every processor mesh, reported as pass/fail (agreed in Nov 2026 for meshes of 25 to
+  400 km; seamsh's tests use the same definitions). There is no target on node degrees."""
+
+  model_config = ConfigDict(extra="forbid")
+
+  min_gamma: float = Field(default=0.4, ge=0.0, le=1.0, description="Smallest acceptable gamma of any face")
+  max_percent_poor: float = Field(
+    default=1.0, ge=0.0, le=100.0, description="Largest acceptable percentage of faces with gamma < 0.8"
+  )
+  min_angle: float = Field(default=15.0, ge=0.0, le=60.0, description="Smallest acceptable angle of any face (degrees)")
+
+
 class RegionConfig(BaseModel):
   """A named region of the ocean: the grid nodes inside any of its polygons of (longitude, latitude) vertices (several
   for archipelagic seas or regions in parts)."""
@@ -155,8 +168,16 @@ class GraphStatisticsConfig(BaseModel):
   length_bin_width_km: PositiveFloat = Field(default=5.0, description="Width of the edge length histogram bins")
   quality_bins: PositiveInt = Field(
     default=20,
-    description="Bins of the triangle quality histograms per unit (radius ratio over [0, 1], volume-length over "
-    "[-1, 1] with twice as many, angles over [0°, 180°])",
+    description="Bins of the triangle quality histograms per unit (gamma over [0, 1], volume-length over [-1, 1] "
+    "with twice as many, angles over [0°, 180°])",
+  )
+  quality_targets: QualityTargetsConfig = Field(
+    default_factory=QualityTargetsConfig, description="Quality targets of the processor meshes' triangles"
+  )
+  small_component_max_faces: NonNegativeInt = Field(
+    default=3,
+    description="Connected components of a processor mesh with at most this many faces are listed and logged as "
+    "warnings (e.g. an enclosed sea meshed as a single triangle at a coarse resolution); 0: no check",
   )
   squashed: SquashedGraphConfig = Field(
     default_factory=SquashedGraphConfig, description="The squashed grid-to-grid graph"

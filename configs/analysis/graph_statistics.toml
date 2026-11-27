@@ -14,6 +14,9 @@ num_sources = 32
 seed = 0
 length_bin_width_km = 5.0
 quality_bins = 20
+# Processor components of at most this many faces are listed and logged as warnings (an enclosed sea meshed as one
+# triangle at a coarse resolution).
+small_component_max_faces = 3
 
 # The model's meshes, finest first: one, or a hierarchy (a V-cycle with message_passing_steps on each mesh on the way
 # down; each decoder adds the coarser mesh's result to the finer mesh's state on the way up). Repeat the table for
@@ -21,6 +24,12 @@ quality_bins = 20
 [[meshes]]
 path = "/data/geometry/uniform_50km.msh"
 message_passing_steps = 16
+
+# Pass/fail targets for the triangles of every processor mesh (no target on node degrees).
+[quality_targets]
+min_gamma = 0.4
+max_percent_poor = 1.0
+min_angle = 15.0
 
 # Squashed grid-to-grid graph (mobydick.graph_statistics.squashed): grid node i -> j when the input at i reaches the
 # output at j through the encoders, the message passing steps and the decoders. Grid nodes sampled as senders and

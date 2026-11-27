@@ -196,9 +196,42 @@ def coverage_table(coverage: list[dict[str, Any]], graphs: dict[str, Any]) -> Ta
   return table
 
 
+def quality_shares_table(name: str, triangles: dict[str, Any]) -> Table:
+  """Faces beyond the quality thresholds (percentages of all faces)."""
+  table = _table(f"Poor triangles of {name}", ["", "faces", "% of all faces"])
+  for key, entry in triangles["thresholds"].items():
+    if key != "description":
+      table.add_row(entry["description"], _format(entry["count"]), _format(entry["percent"]))
+  return table
+
+
+def poor_locations_table(name: str, triangles: dict[str, Any]) -> Table:
+  """Where the poor faces are (percentages of the poor faces, not of all faces)."""
+  table = _table(f"Where the poor triangles of {name} are", ["", "faces", "% of the poor faces"])
+  for key, entry in triangles["poor_faces"].items():
+    if key != "description":
+      table.add_row(key.replace("_", " "), _format(entry["count"]), _format(entry["percent"]))
+  return table
+
+
+def quality_targets_table(graphs: dict[str, Any]) -> Table:
+  """Pass or fail of every quality target, one row per processor mesh and target."""
+  table = _table("Quality targets", ["mesh", "target", "value", "required", "passed"], left=2)
+  for name, stats in graphs.items():
+    if stats["kind"] != "processor":
+      continue
+    targets = stats["triangles"]["targets"]
+    for key, entry in targets.items():
+      if key in ("description", "passed"):
+        continue
+      required = f"{entry['comparison']} {_format(entry['target'])}"
+      table.add_row(name, entry["description"], _format(entry["value"]), required, _format(entry["passed"]))
+  return table
+
+
 def print_summary(results: dict[str, Any], console: Console) -> None:
   """All tables: graphs, edge lengths, degrees, processors, distances, coverage, squashed graph, basin connectivity,
-  then the triangle quality of each processor."""
+  then the triangle quality and the poor triangles of each processor, and the quality targets."""
   graphs = results["graphs"]
   console.print(graphs_table(graphs))
   console.print(summary_table("Edge lengths (km)", [(name, stats["edge_length_km"]) for name, stats in graphs.items()]))
@@ -215,3 +248,6 @@ def print_summary(results: dict[str, Any], console: Console) -> None:
       faces, inverted = _format(triangles["faces"]["value"]), _format(triangles["inverted"]["value"])
       title = f"Triangle quality of {name} ({faces} faces, {inverted} inverted)"
       console.print(summary_table(title, [(key, triangles[key]) for key in TRIANGLE_QUALITY]))
+      console.print(quality_shares_table(name, triangles))
+      console.print(poor_locations_table(name, triangles))
+  console.print(quality_targets_table(graphs))
