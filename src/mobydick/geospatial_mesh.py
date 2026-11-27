@@ -34,9 +34,12 @@ from mobydick.geospatial_mesh_utils import (
 )
 from mobydick.gis_utils import CRSRegistry
 from mobydick.mesh_config import IcosahedralMeshConfig, MeshGenerationConfig
-from mobydick.mesh_graph import small_components
+from mobydick.mesh_graph import format_position, small_components
 
 logger = logging.getLogger(__name__)
+
+# Pieces of a mesh listed in the log after meshing, largest first.
+MAX_PIECES_LOGGED = 20
 
 
 @click.command()
@@ -127,12 +130,17 @@ def warn_small_components(max_faces: int) -> list[dict[str, float | int]]:
   index = np.full(int(tags.max(initial=0)) + 1, -1)
   index[tags.astype(np.int64)] = np.arange(len(tags))
   faces = index[node_tags.astype(np.int64)].reshape(-1, 3)
-  small = small_components(coordinates.reshape(-1, 3), faces, max_faces)
+  pieces = small_components(coordinates.reshape(-1, 3), faces, len(faces))
+  # Every piece, largest first: a seed given on land shows as a piece where no sea is.
+  listed = ", ".join(f"{p['faces']} at {format_position(p['lat'], p['lon'])}" for p in pieces[:MAX_PIECES_LOGGED])
+  more = f" and {len(pieces) - MAX_PIECES_LOGGED} more" if len(pieces) > MAX_PIECES_LOGGED else ""
+  logger.info(f"The mesh has {len(pieces)} piece(s), by triangles: {listed}{more}")
+  small = [p for p in pieces if p["faces"] <= max_faces]
   for component in small:
     logger.warning(
       f"A piece of the mesh has only {component['faces']} triangle(s) and {component['vertices']} nodes, at "
-      f"{component['lat']:.2f}° N, {component['lon']:.2f}° E: a basin smaller than the mesh size (lower the size there "
-      "to resolve it)"
+      f"{format_position(component['lat'], component['lon'])}: a basin smaller than the mesh size (lower the size "
+      "there to resolve it)"
     )
   return small
 
@@ -162,7 +170,7 @@ def write_ocean_mesh(configs: MeshGenerationConfig, output_path: pathlib.Path) -
   boundary = coarsen_boundaries(
     domain,
     configs.coarsen_boundaries.fields,
-    x0=configs.coarsen_boundaries.x0,
+    x0=configs.coarsen_boundaries.seeds(),
     x0_projection_name=configs.coarsen_boundaries.x0_projection,
   )
   mesh_size = CompositeMeshSizeField(configs.fields)

@@ -14,6 +14,7 @@
 # limitations under the License.
 """Validated settings of the mesh generators (moby-dick make-ocean-mesh and make-icosahedral-mesh)."""
 
+import numbers
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
@@ -23,12 +24,9 @@ from pydantic import (
   NonNegativeFloat,
   NonNegativeInt,
   PositiveFloat,
-  PositiveInt,
   field_validator,
   model_validator,
 )
-
-from mobydick.gis_utils import CRSName
 
 CurveType = Literal["polyline", "strictpolyline", "spline", "bspline"]
 
@@ -52,10 +50,10 @@ class MesherConfig(ApplicationConfig):
     description="Optimize the triangles after meshing (gmsh's Relocate2D, seamsh.gmsh.mesh's default): node positions "
     "change, the worst triangles improve",
   )
-  small_component_max_faces: PositiveInt = Field(
+  small_component_max_faces: NonNegativeInt = Field(
     default=3,
     description="Connected components of the mesh with at most this many faces are logged as warnings (e.g. an "
-    "enclosed sea meshed as one triangle: lower the mesh size there to resolve it)",
+    "enclosed sea meshed as one triangle: lower the mesh size there to resolve it); 0: no check",
   )
 
 
@@ -192,19 +190,23 @@ class CoarsenBoundariesConfig(ApplicationConfig):
     min_length=1,
     description="Seeds: points inside the domain, one point or a list of points. The water reachable from any of them "
     "is kept, so a seed in an enclosed sea keeps the sea (as a separate piece of the mesh when its straits close). A "
-    "seed on land meshes that land: the coastline is only a line",
+    "seed on land meshes that land, without a warning (the coastline is only a line): check the pieces logged after "
+    "meshing",
   )
-  x0_projection: CRSName = Field(
+  x0_projection: Literal["stereographic", "equirectangular"] = Field(
     default="stereographic",
-    description="Coordinates of x0: stereographic metres (the North Pole is (0, 0)), or equirectangular, i.e. "
-    "(longitude, latitude) in degrees",
+    description="Coordinates of x0: stereographic metres (the North Pole is (0, 0)), or equirectangular: (latitude, "
+    "longitude) in degrees, in the order of the point_refinement fields' points",
   )
 
   @field_validator("x0", mode="before")
   @classmethod
   def _one_point_is_a_list(cls, x0: Any) -> Any:
     # A single point, (x, y), as before seamsh accepted several.
-    if isinstance(x0, (list, tuple)) and len(x0) == 2 and all(isinstance(c, (int, float)) for c in x0):
+    def is_number(c: Any) -> bool:
+      return isinstance(c, numbers.Real) and not isinstance(c, bool)
+
+    if isinstance(x0, (list, tuple)) and len(x0) == 2 and all(is_number(c) for c in x0):
       return [x0]
     return x0
 
@@ -212,6 +214,21 @@ class CoarsenBoundariesConfig(ApplicationConfig):
   def check_field_names(self) -> Self:
     _check_unique_field_types(self.fields, "coarsening")
     return self
+
+  @model_validator(mode="after")
+  def check_seeds(self) -> Self:
+    if self.x0_projection == "equirectangular":
+      for lat, lon in self.x0:
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 360.0):
+          raise ValueError(f"seed ({lat}, {lon}) is not a (latitude, longitude) in degrees")
+    return self
+
+  def seeds(self) -> list[tuple[float, float]]:
+    """The seeds in the axis order of their projection (`gis_utils.CRSRegistry`): equirectangular seeds are given as
+    (latitude, longitude), and its axes are longitude, then latitude."""
+    if self.x0_projection == "equirectangular":
+      return [(lon, lat) for lat, lon in self.x0]
+    return list(self.x0)
 
 
 class MeshGenerationConfig(ApplicationConfig):

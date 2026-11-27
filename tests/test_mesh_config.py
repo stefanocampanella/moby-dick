@@ -72,7 +72,7 @@ def test_defaults():
 
 @pytest.mark.parametrize(
   ("x0", "expected"),
-  [([1.0, 2.0], [(1.0, 2.0)]), ([[1.0, 2.0]], [(1.0, 2.0)]), ([[0, 90], [34.0, 43.5]], [(0.0, 90.0), (34.0, 43.5)])],
+  [([1.0, 2.0], [(1.0, 2.0)]), ([[1.0, 2.0]], [(1.0, 2.0)]), ([[90, 0], [43.5, 34.0]], [(90.0, 0.0), (43.5, 34.0)])],
   ids=["one_point", "list_of_one", "two_points"],
 )
 def test_seeds_are_one_point_or_a_list(x0, expected):
@@ -83,12 +83,34 @@ def test_seeds_are_one_point_or_a_list(x0, expected):
   assert configs.coarsen_boundaries.x0 == expected
 
 
-@pytest.mark.parametrize("x0", [[], [[1.0]], [[1.0, 2.0, 3.0]]], ids=["empty", "one_coordinate", "three_coordinates"])
-def test_invalid_seeds_are_rejected(x0):
-  """At least one seed is needed, and each is a pair of coordinates."""
-  coarsening = {"fields": [UNIFORM_COARSENING], "x0": x0}
+@pytest.mark.parametrize(
+  ("x0", "projection"),
+  [
+    ([], "stereographic"),
+    ([[1.0]], "stereographic"),
+    ([[1.0, 2.0, 3.0]], "stereographic"),
+    ([True, False], "stereographic"),
+    ([[95.0, 20.0]], "equirectangular"),
+    ([[0.0, 0.0]], "cartesian"),
+  ],
+  ids=["empty", "one_coordinate", "three_coordinates", "booleans", "latitude_out_of_range", "cartesian"],
+)
+def test_invalid_seeds_are_rejected(x0, projection):
+  """At least one seed is needed, each a pair of numbers (not booleans); equirectangular seeds are a (latitude,
+  longitude) in range; only stereographic and equirectangular coordinates are seeds (cartesian points have three)."""
+  coarsening = {"fields": [UNIFORM_COARSENING], "x0": x0, "x0_projection": projection}
   with pytest.raises(ValidationError):
     MeshGenerationConfig.model_validate(_settings(coarsen_boundaries=coarsening))
+
+
+def test_equirectangular_seeds_are_latitude_then_longitude():
+  """Seeds in degrees are (latitude, longitude), as the points of point_refinement fields, and reach seamsh in the axis
+  order of the equirectangular CRS (longitude, latitude); stereographic seeds are passed as given."""
+  coarsening = {"fields": [UNIFORM_COARSENING], "x0": [[90.0, 0.0], [43.5, 34.0]], "x0_projection": "equirectangular"}
+  configs = MeshGenerationConfig.model_validate(_settings(coarsen_boundaries=coarsening))
+  assert configs.coarsen_boundaries.seeds() == [(0.0, 90.0), (34.0, 43.5)]
+  stereographic = MeshGenerationConfig.model_validate(MINIMAL).coarsen_boundaries
+  assert stereographic.seeds() == [(0.0, 0.0)]
 
 
 @pytest.mark.parametrize(
@@ -388,7 +410,7 @@ def test_meshes_are_read_one_after_the_other(coastline):
 
 
 def _mesh_channel(coastline: pathlib.Path, seeds: str, coarsening: float, size: float) -> tuple[pathlib.Path, str]:
-  """Mesh the channel coastline with seeds in longitude and latitude, a uniform coarsening and a uniform mesh size;
+  """Mesh the channel coastline with seeds in latitude and longitude, a uniform coarsening and a uniform mesh size;
   the output file and the command's output (with the log: the command configures its own handler, which caplog does
   not see)."""
   config = coastline / "seeds.toml"
@@ -400,28 +422,30 @@ def _mesh_channel(coastline: pathlib.Path, seeds: str, coarsening: float, size: 
     f'[[fields]]\nname = "uniform"\nvalue = {size}\n'
   )
   output = coastline / "seeds.msh"
-  result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--overwrite", "--log-level", "warning"])
+  result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--overwrite", "--log-level", "info"])
   assert result.exit_code == 0, result.output
   return output, result.output
 
 
 def test_a_seed_in_an_enclosed_sea_meshes_it_as_a_piece_of_its_own(channel_coastline):
   """With a second seed in the inland sea, whose channel closes at the coarsening size, the sea is meshed as a second
-  connected component instead of being lost; seeds are given as (longitude, latitude)."""
-  output, log = _mesh_channel(channel_coastline, "[[0.0, 90.0], [20.0, 0.0]]", 200_000.0, 300_000.0)
+  connected component instead of being lost, and the log lists both pieces; seeds are given as (latitude,
+  longitude)."""
+  output, log = _mesh_channel(channel_coastline, "[[90.0, 0.0], [0.0, 20.0]]", 200_000.0, 300_000.0)
   graph = read_mesh_data(output, gmsh_verbosity=0).mesh_graph
   count, labels = face_components(graph.faces, len(graph.vertices))
   lat, lon = cartesian_to_lat_lon(graph.vertices)
   in_sea = (np.abs(lat) < 4.5) & (lon > 15.5) & (lon < 24.5)
   assert count == 2 and in_sea.any()
   assert len(np.unique(labels[in_sea])) == 1 and labels[in_sea][0] != labels[np.argmax(lat)]
-  assert "WARNING" not in log
+  assert "The mesh has 2 piece(s)" in log
+  assert "A piece of the mesh has only" not in log and "not in the coarsened domain" not in log
 
 
 def test_a_sea_smaller_than_the_mesh_size_is_one_triangle_with_a_warning(channel_coastline):
   """A seeded sea smaller than the mesh size is kept by seamsh as a single triangle (no interior node), which models
   may not support later: make-ocean-mesh logs a warning that gives its position."""
-  output, log = _mesh_channel(channel_coastline, "[[0.0, 90.0], [20.0, 0.0]]", 200_000.0, 3_000_000.0)
+  output, log = _mesh_channel(channel_coastline, "[[90.0, 0.0], [0.0, 20.0]]", 200_000.0, 3_000_000.0)
   graph = read_mesh_data(output, gmsh_verbosity=0).mesh_graph
   _, labels = face_components(graph.faces, len(graph.vertices))
   faces_per_component = np.bincount(labels[graph.faces[:, 0]])
@@ -432,7 +456,7 @@ def test_a_sea_smaller_than_the_mesh_size_is_one_triangle_with_a_warning(channel
 def test_a_seed_whose_sea_the_coarsening_loses_gives_a_warning(channel_coastline):
   """A coarsening size about the width of the seeded sea thins it to nothing: seamsh logs that the seed is not in the
   coarsened domain, and the ocean alone is meshed."""
-  output, log = _mesh_channel(channel_coastline, "[[0.0, 90.0], [20.0, 0.0]]", 1_500_000.0, 3_000_000.0)
+  output, log = _mesh_channel(channel_coastline, "[[90.0, 0.0], [0.0, 20.0]]", 1_500_000.0, 3_000_000.0)
   assert "of x0 is not in the coarsened domain" in log
   graph = read_mesh_data(output, gmsh_verbosity=0).mesh_graph
   assert face_components(graph.faces, len(graph.vertices))[0] == 1
