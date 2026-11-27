@@ -45,6 +45,7 @@ from mobydick.mesh_graph import (
   boundary_vertices,
   face_rows_from_boundary,
   faces_to_edges,
+  format_position,
   longest_incident_edges,
   small_components,
 )
@@ -433,8 +434,19 @@ def test_small_components_are_listed_and_logged(caplog):
   (component,) = stats["small_components"]["value"]
   assert component["faces"] == 1 and component["vertices"] == 3
   assert component["lat"] == pytest.approx(43.3, abs=0.05) and component["lon"] == pytest.approx(34.5, abs=0.05)
-  assert "mesh_1: a connected component of 1 face(s)" in caplog.text
+  assert "mesh_1: a connected component of 1 face(s) and 3 vertices at 43.30° N, 34.50° E" in caplog.text
   assert len(small_components(vertices, faces, 1000)) == 2
+  # 0 turns the check off.
+  assert (
+    geometry.triangle_statistics(_mesh(vertices, faces), 20, small_component_max_faces=0)["small_components"]["value"]
+    == []
+  )
+
+
+def test_positions_name_their_hemispheres():
+  """Positions in messages are absolute degrees with N/S and E/W, not signed degrees with fixed hemispheres."""
+  assert format_position(-20.0, -30.0) == "20.00° S, 30.00° W"
+  assert format_position(43.3, 34.5) == "43.30° N, 34.50° E"
 
 
 def test_cli_prints_tables_and_writes_described_statistics(mask_path, tmp_path, write_config):

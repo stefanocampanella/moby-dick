@@ -174,10 +174,10 @@ class GraphStatisticsConfig(BaseModel):
   quality_targets: QualityTargetsConfig = Field(
     default_factory=QualityTargetsConfig, description="Quality targets of the processor meshes' triangles"
   )
-  small_component_max_faces: PositiveInt = Field(
+  small_component_max_faces: NonNegativeInt = Field(
     default=3,
     description="Connected components of a processor mesh with at most this many faces are listed and logged as "
-    "warnings (e.g. an enclosed sea meshed as a single triangle at a coarse resolution)",
+    "warnings (e.g. an enclosed sea meshed as a single triangle at a coarse resolution); 0: no check",
   )
   squashed: SquashedGraphConfig = Field(
     default_factory=SquashedGraphConfig, description="The squashed grid-to-grid graph"

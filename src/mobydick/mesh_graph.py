@@ -319,6 +319,11 @@ def small_components(vertices: np.ndarray, faces: np.ndarray, max_faces: int) ->
   return result
 
 
+def format_position(lat: float, lon: float) -> str:
+  """A position for messages: absolute degrees with the hemispheres, e.g. "20.00° S, 30.00° W"."""
+  return f"{abs(lat):.2f}° {'N' if lat >= 0 else 'S'}, {abs(lon):.2f}° {'E' if lon >= 0 else 'W'}"
+
+
 def _get_undirected_edges(edges: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
   """Transforms directed edges to undirected edges by using standard ordering of vertices.
 

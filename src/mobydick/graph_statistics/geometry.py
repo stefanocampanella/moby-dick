@@ -34,7 +34,7 @@ import pyproj
 from mobydick.graph_statistics.config import QualityTargetsConfig
 from mobydick.graph_statistics.graphs import Graph
 from mobydick.graph_statistics.quantities import described, fraction, histogram, summarize
-from mobydick.mesh_graph import MeshGraph, face_rows_from_boundary, small_components
+from mobydick.mesh_graph import MeshGraph, face_rows_from_boundary, format_position, small_components
 
 logger = logging.getLogger(__name__)
 
@@ -243,11 +243,11 @@ def triangle_statistics(
   result["targets"] = described(
     "Quality targets (pass/fail)", quality_targets(quality, targets or QualityTargetsConfig())
   )
-  small = small_components(vertices, faces, small_component_max_faces)
+  small = small_components(vertices, faces, small_component_max_faces) if small_component_max_faces else []
   for component in small:
     logger.warning(
       f"{name}: a connected component of {component['faces']} face(s) and {component['vertices']} vertices at "
-      f"{component['lat']:.2f}° N, {component['lon']:.2f}° E (an enclosed sea smaller than the elements?)"
+      f"{format_position(component['lat'], component['lon'])} (an enclosed sea smaller than the elements?)"
     )
   result["small_components"] = described(
     f"Connected components of at most {small_component_max_faces} faces, largest first (faces, vertices, latitude "
