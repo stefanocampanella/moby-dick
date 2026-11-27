@@ -17,9 +17,11 @@
 
 import logging
 import pathlib
+import sys
 
 import click
 import gmsh
+import numpy as np
 import seamsh
 
 from mobydick import cli_utils, icosahedral_mesh
@@ -32,8 +34,12 @@ from mobydick.geospatial_mesh_utils import (
 )
 from mobydick.gis_utils import CRSRegistry
 from mobydick.mesh_config import IcosahedralMeshConfig, MeshGenerationConfig
+from mobydick.mesh_graph import format_position, small_components
 
 logger = logging.getLogger(__name__)
+
+# Pieces of a mesh listed in the log after meshing, largest first.
+MAX_PIECES_LOGGED = 20
 
 
 @click.command()
@@ -115,8 +121,34 @@ def make_icosahedral_mesh(
   write_multi_mesh(mesh_data, output_path, model_name=configs.model_name, mesh_size_view_name=configs.view_tag_name)
 
 
+def warn_small_components(max_faces: int) -> list[dict[str, float | int]]:
+  """Log a warning for each connected component of the current gmsh model's triangles with at most `max_faces` faces
+  (`mesh_graph.small_components`), and return them. seamsh keeps an enclosed sea smaller than the mesh size as one
+  triangle; such a piece has no interior node, and later models (e.g. hierarchies) may not support it."""
+  _, node_tags = gmsh.model.mesh.getElementsByType(2)
+  tags, coordinates, _ = gmsh.model.mesh.getNodes()
+  index = np.full(int(tags.max(initial=0)) + 1, -1)
+  index[tags.astype(np.int64)] = np.arange(len(tags))
+  faces = index[node_tags.astype(np.int64)].reshape(-1, 3)
+  pieces = small_components(coordinates.reshape(-1, 3), faces, len(faces))
+  # Every piece, largest first: a seed given on land shows as a piece where no sea is.
+  listed = ", ".join(f"{p['faces']} at {format_position(p['lat'], p['lon'])}" for p in pieces[:MAX_PIECES_LOGGED])
+  more = f" and {len(pieces) - MAX_PIECES_LOGGED} more" if len(pieces) > MAX_PIECES_LOGGED else ""
+  logger.info(f"The mesh has {len(pieces)} piece(s), by triangles: {listed}{more}")
+  small = [p for p in pieces if p["faces"] <= max_faces]
+  for component in small:
+    logger.warning(
+      f"A piece of the mesh has only {component['faces']} triangle(s) and {component['vertices']} nodes, at "
+      f"{format_position(component['lat'], component['lon'])}: a basin smaller than the mesh size (lower the size "
+      "there to resolve it)"
+    )
+  return small
+
+
 def write_ocean_mesh(configs: MeshGenerationConfig, output_path: pathlib.Path) -> None:
   """Mesh the domain with seamsh and gmsh, and write the mesh with one view per mesh size field (and their minimum)."""
+  # Progress bars only on a terminal, not in batch logs.
+  seamsh.show_progress(sys.stderr.isatty())
   # gmsh needs to be initialized before most seamsh functions can be used.
   if not gmsh.is_initialized():
     logger.info("Initialize gmsh.")
@@ -138,11 +170,18 @@ def write_ocean_mesh(configs: MeshGenerationConfig, output_path: pathlib.Path) -
   boundary = coarsen_boundaries(
     domain,
     configs.coarsen_boundaries.fields,
-    x0=configs.coarsen_boundaries.x0,
+    x0=configs.coarsen_boundaries.seeds(),
     x0_projection_name=configs.coarsen_boundaries.x0_projection,
   )
   mesh_size = CompositeMeshSizeField(configs.fields)
-  seamsh.gmsh.mesh(boundary, mesh_size, output_srs=CRSRegistry["cartesian"], smoothness=configs.mesh.smoothness)
+  seamsh.gmsh.mesh(
+    boundary,
+    mesh_size,
+    output_srs=CRSRegistry["cartesian"],
+    smoothness=configs.mesh.smoothness,
+    optimize=configs.mesh.optimize,
+  )
+  warn_small_components(configs.mesh.small_component_max_faces)
   # Compute and add view containing mesh size field(s), finally save results
   node_tags, node_coords, _ = gmsh.model.mesh.getNodes(includeBoundary=True)
   node_coords = node_coords.reshape(-1, 3)

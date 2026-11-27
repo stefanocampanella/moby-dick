@@ -606,6 +606,16 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
     `uniform_25km.toml`;
   - node counts scale as 1/size², so 363,900 × (35/25)² ≈ 713,000;
   - its description (150 km), and that of the 120 km mesh, came from an outdated template; both `.msh` files keep it.
+- **Seeds and optimisation** (27 Nov 2026, seamsh 0.6.0+fork): `[coarsen_boundaries] x0` is one point or a list of
+  seeds (`x0_projection = "equirectangular"` for (latitude, longitude) in degrees, the order of the `point_refinement`
+  points, swapped for seamsh by `CoarsenBoundariesConfig.seeds()`; default the North Pole in stereographic metres);
+  the water reachable from any seed is kept, so a seeded enclosed sea whose straits close is a separate piece of the
+  mesh. seamsh logs a warning for a seed whose basin the coarsening loses; a seed on land meshes that land without a
+  warning, so `make-ocean-mesh` logs every piece (up to 20, largest first, with positions) at INFO. `[mesh] optimize`
+  (default true) runs gmsh's Relocate2D after meshing. After meshing, `make-ocean-mesh` logs a warning for each
+  component of at most `[mesh] small_component_max_faces` (3; 0: no check) triangles (a sea smaller than the mesh
+  size is one triangle). seamsh's progress bars show only on a terminal. Tests on the synthetic channel coastline:
+  `tests/test_mesh_config.py`.
 - **Descriptions** of all `configs/mesh/*.toml` match their fields (checked on 30 Oct 2026). The `lambrechts*`
   configs take the smaller of a shore-proximity and a bathymetry field; they said "uniform 300 km" before.
   `domain.sampling` in them is ignored (the shore-proximity field has its own).

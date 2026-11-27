@@ -1768,3 +1768,22 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
     as two new tables.
   - The connected components of at most `small_component_max_faces` faces (default 3, from
     `mesh_graph.small_components`) are listed with their position and logged as warnings.
+
+## 2026-11-27 17:40: seamsh 0.6.0+fork features: seeds, optimisation, warnings
+
+- **Change:**
+  - `[coarsen_boundaries] x0` takes one point or a list of seeds, in stereographic metres or, with
+    `x0_projection = "equirectangular"`, in longitude and latitude.
+  - `[mesh] optimize` is passed to `seamsh.gmsh.mesh`.
+  - After meshing, `make-ocean-mesh` warns about every piece of at most `small_component_max_faces` triangles, using
+    `mesh_graph.small_components` from the previous PR.
+  - seamsh's progress bars show only on a terminal.
+- **Insight:**
+  - seamsh logs a lost seed as a WARNING, which already reaches the command's log through the root logger.
+  - seamsh logs a sea kept as one triangle only at INFO, hence moby-dick's own warning.
+  - The command's `configure_logging(force=True)` removes pytest's caplog handler, so the tests read the command's
+    output instead.
+- **Tests:** on the synthetic channel coastline:
+  - a seed in the inland sea gives a second component;
+  - a 3,000 km mesh size makes that sea one triangle, with the warning;
+  - a 1,500 km coarsening loses it, with seamsh's warning.

@@ -14,11 +14,11 @@
 ## Checks and improvements
 * Adopt seamsh v0.6.0+fork's features (pinned since 12 Nov 2026; guide: the fork's `doc/fork.rst`, section "For
   moby-dick"). One PR, with the licensing item below:
-  * `coarsen_boundaries.x0` as a list of seeds (one in the open ocean, one per enclosed sea to keep), instead of or with
-    the strait refinement, and seamsh's warnings on lost seeds kept in the logs;
-  * per-level coastline coarsening for mesh hierarchies (each level coarsened at about its size);
-  * the `optimize` option of `seamsh.gmsh.mesh` (on by default) exposed in `MesherConfig`;
-  * `read_mesh`'s removal of nodes in no triangle kept only for meshes made with older seamsh versions. **Medium
+  * ~~`coarsen_boundaries.x0` as a list of seeds, seamsh's warnings on lost seeds in the logs, `optimize` in
+    `MesherConfig`~~ (27 Nov 2026);
+  * per-level coastline coarsening and seeds in the configs of a mesh hierarchy (each level coarsened at about its
+    size);
+  * `read_mesh`'s removal of nodes in no triangle: goes with the `.msh` reader (UGRID mesh files). **Medium
     priority**
 * Licensing (audit of 12 Nov 2026, details in CLAUDE.md, Repository notes, Dependencies). One PR:
   * Keep GPL code out of training: gmsh (GPL-2.0-or-later) and seamsh (GPL-3.0) as an optional `meshing` extra,
