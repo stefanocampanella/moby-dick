@@ -9,8 +9,8 @@
 # weights and the order of the training samples.
 # Usage: clusters/jupiter/slurm/mesh_study.sh [--account A] STUDY_NAME SEEDS MESH:MSG_STEPS[:EDGE_CHUNK_SIZE[:TIME]] ...
 #   e.g. clusters/jupiter/slurm/mesh_study.sh mesh_msg 42,43 120km:8 50km:16::03:00:00 40km:16:262144:06:00:00
-# MESH is a uniform mesh's size (GEOMETRY_DIR/uniform_MESH.msh) or the name of another mesh file
-# (GEOMETRY_DIR/MESH.msh, e.g. icosahedral_6 from moby-dick make-icosahedral-mesh).
+# MESH is a uniform mesh's size (GEOMETRY_DIR/uniform_MESH.nc) or the name of another mesh file
+# (GEOMETRY_DIR/MESH.nc, e.g. icosahedral_6 from moby-dick make-icosahedral-mesh).
 # Configs: runs/STUDY_NAME/configs/demo_5000_MESH_msgN_seedS.toml; TensorBoard: DATA_ROOT/tensorboard/STUDY_NAME/<case>.
 set -euo pipefail
 PROJECT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
@@ -39,9 +39,9 @@ for ENTRY in "$@"; do
     CHUNKS=${CHUNKS:-0}
     TIME=03:00:00
     [[ -n ${HOURS:-} ]] && TIME="$HOURS:$MINUTES:$SECS"
-    MESH_FILE=uniform_$MESH.msh
-    [[ -f $GEOMETRY_DIR/$MESH_FILE ]] || MESH_FILE=$MESH.msh
-    [[ -f $GEOMETRY_DIR/$MESH_FILE ]] || { echo "no mesh uniform_$MESH.msh or $MESH.msh in $GEOMETRY_DIR" >&2; exit 1; }
+    MESH_FILE=uniform_$MESH.nc
+    [[ -f $GEOMETRY_DIR/$MESH_FILE ]] || MESH_FILE=$MESH.nc
+    [[ -f $GEOMETRY_DIR/$MESH_FILE ]] || { echo "no mesh uniform_$MESH.nc or $MESH.nc in $GEOMETRY_DIR" >&2; exit 1; }
     for SEED in "${SEED_LIST[@]}"; do
         NAME="demo_5000_${MESH}_msg${MSG}_seed$SEED"
         sed -e "s|^path = \"/data/geometry/[^\"]*\"|path = \"/data/geometry/$MESH_FILE\"|" \

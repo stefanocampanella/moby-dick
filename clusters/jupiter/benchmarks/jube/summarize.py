@@ -111,7 +111,7 @@ def job_rows(root):
         host_alloc = max((float(size) for err in task_errs for size in HOST_OOM.findall(err)), default=None)
         steps = to_float(row["step_last"]) or 0
         target = int(re.search(r"(?m)^training_steps = (\d+)", bench).group(1))
-        mesh = re.search(r'(?m)^path = "/data/geometry/uniform_(\w+)\.msh"', bench)
+        mesh = re.search(r'(?m)^path = "/data/geometry/uniform_(\w+)\.(?:nc|msh)"', bench)
         msg_steps = re.search(r"(?m)^gnn_msg_steps = (\d+)", bench)
         out = {
           "experiment": experiment,

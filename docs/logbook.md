@@ -1787,3 +1787,31 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - a seed in the inland sea gives a second component;
   - a 3,000 km mesh size makes that sea one triangle, with the warning;
   - a 1,500 km coarsening loses it, with seamsh's warning.
+
+## 2026-11-27 19:00: mesh files in UGRID NetCDF-4, no .msh reader
+
+- **Request:**
+  - Decide between Zarr and NetCDF for the UGRID mesh file: NetCDF-4 with h5netcdf, so that QGIS and ParaView open
+    it.
+  - The file holds every mesh, the size fields, the connectivity between meshes and the barycentric weights for the
+    interpolating decoder.
+  - Drop the `.msh` reader: meshes are regenerated, not converted.
+- **Change:**
+  - `mobydick/ugrid.py`:
+    - one topology `mesh<l>` per level, finest first;
+    - node x/y/z read back bit for bit, plus lon/lat for the tools;
+    - faces, directed processor edges, boundary, mesh size and each size field;
+    - closest face, weights and distance between consecutive levels, both ways.
+  - `make-ocean-mesh OUTPUT.nc [--msh FILE]` and `make-icosahedral-mesh OUTPUT.nc` write mesh files.
+    `make-ocean-mesh` takes the nodes of the triangles only and the boundary from the faces, and computes the size
+    fields there.
+  - New command `combine-meshes`: files of one mesh each, finest first, become one hierarchy.
+  - Training (`[mesh] path`, `level`), `graph-statistics` (`level` per mesh) and `compute-grid-basis --level` read the
+    file.
+  - Removed: `read_mesh`, `read_mesh_data`, `write_multi_mesh`, the isolated-node handling, and the config fields
+    `view_tag_name`, `mesh_size_tag_name` and `step`.
+  - `basis_utils.barycentric_coordinates` is shared by `compute_basis` and the links.
+  - New dependency: h5netcdf.
+  - The configs, `mesh_study.sh` and JUBE name `.nc` files (`summarize.py` reads both).
+- **To do on JUPITER:** regenerate the meshes as `.nc`, with the image rebuilt for h5netcdf. Until then
+  `APPTAINERENV_PYTHONPATH` sources fail on `import h5netcdf`.

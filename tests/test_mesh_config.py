@@ -27,7 +27,7 @@ from pydantic import ValidationError
 
 from mobydick import cli_utils
 from mobydick.geospatial_mesh import make_ocean_mesh
-from mobydick.geospatial_mesh_utils import PointRefinementField, read_mesh_data
+from mobydick.geospatial_mesh_utils import PointRefinementField
 from mobydick.gis_utils import (
   cartesian_crs,
   cartesian_to_lat_lon,
@@ -42,6 +42,7 @@ from mobydick.mesh_config import (
   field_arguments,
 )
 from mobydick.mesh_graph import face_components, faces_to_edges
+from mobydick.ugrid import read_mesh_file, read_size_fields
 
 MESH_CONFIGS = pathlib.Path(__file__).parents[1] / "configs" / "mesh"
 COAST_LATITUDE = -70.0
@@ -61,11 +62,11 @@ def _settings(**changes) -> dict:
 
 
 def test_defaults():
-  """Defaults: the gmsh options and smoothness used before they were configurable, one MeshSize view."""
+  """Defaults: the gmsh options and smoothness used before they were configurable, one seed at the North Pole."""
   configs = MeshGenerationConfig.model_validate(MINIMAL)
   assert (configs.gmsh.verbosity, configs.gmsh.algorithm, configs.gmsh.msh_file_version) == (2, 6, 4.1)
   assert configs.mesh.smoothness == 0.3 and configs.mesh.optimize and configs.mesh.small_component_max_faces == 3
-  assert configs.view_tag_name == "MeshSize" and configs.model_name == "OceanMesh"
+  assert configs.model_name == "OceanMesh"
   assert configs.domain.physical_name_field == "featurecla" and configs.domain.curve_type == "bspline"
   assert configs.coarsen_boundaries.x0 == [(0.0, 0.0)] and configs.coarsen_boundaries.x0_projection == "stereographic"
 
@@ -155,7 +156,6 @@ def test_shipped_icosahedral_configs_are_valid(path):
     (_settings(fields=[{"name": "constant", "value": 1.0}]), "name"),
     (_settings(fields=[{"name": "uniform", "value": -1.0}]), "greater than 0"),
     (_settings(fields=[{"name": "uniform", "value": 1.0}, {"name": "uniform", "value": 2.0}]), "repeated"),
-    (_settings(view_tag_name="uniform"), "also the name of a field"),
     (_settings(coarsen_boundaries={"fields": []}), "at least 1"),
     (_settings(coarsen_boundaries={"fields": [{"name": "uniform", "value": 0.0}]}), "greater than 0"),
     (
@@ -248,10 +248,10 @@ def _write_config(path: pathlib.Path, extra: str = "") -> pathlib.Path:
 def test_make_ocean_mesh(coastline):
   """The CLI meshes the ocean north of the coastline and stores the description and the mesh size at every node."""
   config = _write_config(coastline / "mesh.toml")
-  output = coastline / "out" / "mesh.msh"
+  output = coastline / "out" / "mesh.nc"
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--log-level", "warning"])
   assert result.exit_code == 0, result.output
-  mesh_data = read_mesh_data(output, gmsh_verbosity=0)
+  mesh_data = read_mesh_file(output)
   vertices = mesh_data.mesh_graph.vertices
   latitudes = np.degrees(np.arcsin(vertices[:, 2] / np.linalg.norm(vertices, axis=1)))
   assert len(vertices) > 100
@@ -261,9 +261,11 @@ def test_make_ocean_mesh(coastline):
   assert mesh_data.mesh_size is not None
   np.testing.assert_allclose(mesh_data.mesh_size, 1_000_000.0)
   assert " ".join(mesh_data.description) == "A test mesh" and " ".join(mesh_data.license) == "A test license"
-  # The coastline lines are the boundary (not multi-mesh edges): the edges are those of the triangles.
+  # The boundary is the coastline, every node is in a triangle, and the edges are those of the triangles.
   graph = mesh_data.mesh_graph
   assert graph.boundary is not None and graph.boundary.any() and not graph.boundary.all()
+  assert latitudes[graph.boundary].max() < COAST_LATITUDE + 0.5
+  assert np.isin(np.arange(len(vertices)), graph.faces).all()
   senders, receivers = faces_to_edges(graph.faces)
   np.testing.assert_array_equal(graph.edges[0], senders)
   np.testing.assert_array_equal(graph.edges[1], receivers)
@@ -336,10 +338,10 @@ def test_a_narrow_channel_needs_refinement_to_keep_the_sea_behind_it(channel_coa
       else ""
     )
   )
-  output = channel_coastline / "mesh.msh"
+  output = channel_coastline / "mesh.nc"
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--log-level", "warning"])
   assert result.exit_code == 0, result.output
-  graph = read_mesh_data(output, gmsh_verbosity=0).mesh_graph
+  graph = read_mesh_file(output).mesh_graph
   lat, lon = cartesian_to_lat_lon(graph.vertices)
   in_sea = (np.abs(lat) < 4.5) & (lon > 15.5) & (lon < 24.5)
   assert in_sea.any() == refined
@@ -351,7 +353,7 @@ def test_a_narrow_channel_needs_refinement_to_keep_the_sea_behind_it(channel_coa
 def test_make_ocean_mesh_refuses_existing_output(coastline):
   """An existing output is replaced only with --overwrite."""
   config = _write_config(coastline / "mesh.toml")
-  output = coastline / "mesh.msh"
+  output = coastline / "mesh.nc"
   output.write_text("existing")
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output)])
   assert result.exit_code != 0 and "--overwrite" in result.output
@@ -361,7 +363,7 @@ def test_make_ocean_mesh_refuses_existing_output(coastline):
 def test_invalid_config_is_a_click_error(coastline):
   """Invalid settings are reported as a CLI error before anything is meshed or written."""
   config = _write_config(coastline / "mesh.toml", extra="unknown = 1\n")
-  output = coastline / "mesh.msh"
+  output = coastline / "mesh.nc"
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output)])
   assert result.exit_code != 0 and "Invalid configuration" in result.output
   assert not output.exists()
@@ -374,39 +376,38 @@ SHORE_FIELD = (
 
 
 def _mesh(coastline: pathlib.Path, name: str, extra: str = "") -> pathlib.Path:
-  """Mesh the synthetic coastline with the test settings (plus extra TOML), into coastline / name.msh."""
+  """Mesh the synthetic coastline with the test settings (plus extra TOML), into coastline / name.nc."""
   # Paths are used as they are: the shapefile by its absolute path.
   extra = extra.replace('"coast.shp"', f'"{coastline / "coast.shp"}"')
   config = _write_config(coastline / f"{name}.toml", extra=extra)
-  output = coastline / f"{name}.msh"
+  output = coastline / f"{name}.nc"
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output)])
   assert result.exit_code == 0, result.output
   return output
 
 
-def test_the_mesh_is_written_once(coastline):
-  """With two fields (a view each, plus their minimum) the file holds the mesh once, and every view reads back."""
+def test_the_size_fields_are_written_at_every_node(coastline):
+  """With two fields, the mesh file holds each at every node of the triangles, and the mesh size is their minimum."""
   output = _mesh(coastline, "two_fields", extra=SHORE_FIELD)
-  assert sum(line.strip() == b"$Nodes" for line in output.open("rb")) == 1
-  sizes = {}
-  for name in ("MeshSize", "uniform", "shore_proximity"):
-    mesh_size = read_mesh_data(output, gmsh_verbosity=0, mesh_size_tag_name=name).mesh_size
-    assert mesh_size is not None
-    sizes[name] = mesh_size
+  mesh_data = read_mesh_file(output)
+  sizes = read_size_fields(output)
+  assert set(sizes) == {"uniform", "shore_proximity"} and mesh_data.mesh_size is not None
+  for values in (*sizes.values(), mesh_data.mesh_size):
+    assert values.shape == (len(mesh_data.mesh_graph.vertices),)
   np.testing.assert_allclose(sizes["uniform"], 1_000_000.0)
-  np.testing.assert_allclose(sizes["MeshSize"], np.minimum(sizes["uniform"], sizes["shore_proximity"]))
+  np.testing.assert_allclose(mesh_data.mesh_size, np.minimum(sizes["uniform"], sizes["shore_proximity"]))
 
 
-def test_meshes_are_read_one_after_the_other(coastline):
-  """Reading a mesh does not pick up the views of a mesh read before it, which have other node tags."""
-  first = _mesh(coastline, "first")
-  second = _mesh(coastline, "second", extra=SHORE_FIELD)
-  for path in (first, second, first):
-    mesh_data = read_mesh_data(path, gmsh_verbosity=0)
-    assert mesh_data.mesh_size is not None
-    assert len(mesh_data.mesh_size) == len(mesh_data.mesh_graph.vertices)
-  # The first mesh, read last, still has its own (uniform) sizes, not those of the second.
-  np.testing.assert_allclose(mesh_data.mesh_size, 1_000_000.0)
+def test_the_msh_option_writes_the_mesh_for_gmsh(coastline):
+  """--msh also writes the mesh in gmsh's format, for looking at it in gmsh, with the same triangles."""
+  config = _write_config(coastline / "mesh.toml")
+  output, msh = coastline / "mesh.nc", coastline / "mesh.msh"
+  result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--msh", str(msh), "--log-level", "warning"])
+  assert result.exit_code == 0, result.output
+  text = msh.read_text()
+  assert "$Nodes" in text and "$Elements" in text
+  result = CliRunner().invoke(make_ocean_mesh, [str(config), str(coastline / "other.nc"), "--msh", str(msh)])
+  assert result.exit_code != 0 and "--overwrite" in result.output
 
 
 def _mesh_channel(coastline: pathlib.Path, seeds: str, coarsening: float, size: float) -> tuple[pathlib.Path, str]:
@@ -421,7 +422,7 @@ def _mesh_channel(coastline: pathlib.Path, seeds: str, coarsening: float, size: 
     f'fields = [{{name = "uniform", value = {coarsening}}}]\n'
     f'[[fields]]\nname = "uniform"\nvalue = {size}\n'
   )
-  output = coastline / "seeds.msh"
+  output = coastline / "seeds.nc"
   result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--overwrite", "--log-level", "info"])
   assert result.exit_code == 0, result.output
   return output, result.output
@@ -432,7 +433,7 @@ def test_a_seed_in_an_enclosed_sea_meshes_it_as_a_piece_of_its_own(channel_coast
   connected component instead of being lost, and the log lists both pieces; seeds are given as (latitude,
   longitude)."""
   output, log = _mesh_channel(channel_coastline, "[[90.0, 0.0], [0.0, 20.0]]", 200_000.0, 300_000.0)
-  graph = read_mesh_data(output, gmsh_verbosity=0).mesh_graph
+  graph = read_mesh_file(output).mesh_graph
   count, labels = face_components(graph.faces, len(graph.vertices))
   lat, lon = cartesian_to_lat_lon(graph.vertices)
   in_sea = (np.abs(lat) < 4.5) & (lon > 15.5) & (lon < 24.5)
@@ -446,7 +447,7 @@ def test_a_sea_smaller_than_the_mesh_size_is_one_triangle_with_a_warning(channel
   """A seeded sea smaller than the mesh size is kept by seamsh as a single triangle (no interior node), which models
   may not support later: make-ocean-mesh logs a warning that gives its position."""
   output, log = _mesh_channel(channel_coastline, "[[90.0, 0.0], [0.0, 20.0]]", 200_000.0, 3_000_000.0)
-  graph = read_mesh_data(output, gmsh_verbosity=0).mesh_graph
+  graph = read_mesh_file(output).mesh_graph
   _, labels = face_components(graph.faces, len(graph.vertices))
   faces_per_component = np.bincount(labels[graph.faces[:, 0]])
   assert faces_per_component[faces_per_component > 0].min() == 1
@@ -458,7 +459,7 @@ def test_a_seed_whose_sea_the_coarsening_loses_gives_a_warning(channel_coastline
   coarsened domain, and the ocean alone is meshed."""
   output, log = _mesh_channel(channel_coastline, "[[90.0, 0.0], [0.0, 20.0]]", 1_500_000.0, 3_000_000.0)
   assert "of x0 is not in the coarsened domain" in log
-  graph = read_mesh_data(output, gmsh_verbosity=0).mesh_graph
+  graph = read_mesh_file(output).mesh_graph
   assert face_components(graph.faces, len(graph.vertices))[0] == 1
 
 

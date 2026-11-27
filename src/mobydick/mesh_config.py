@@ -170,7 +170,8 @@ FieldConfig = Annotated[
 
 def _check_unique_field_types(fields: list[FieldConfig], what: str) -> None:
   """Each field type at most once: the fields are kept by type name (`CompositeMeshSizeField.fields`; for the mesh,
-  each is also written as a view named after it), so a second field of a type would silently replace the first."""
+  each is also written as a size field named after it), so a second field of a type would silently replace the
+  first."""
   names = [field.name for field in fields]
   if duplicates := sorted({name for name in names if names.count(name) > 1}):
     raise ValueError(f"Each {what} field type may appear once, repeated: {duplicates}")
@@ -236,8 +237,7 @@ class MeshGenerationConfig(ApplicationConfig):
 
   description: str = ""
   license: str = ""
-  model_name: str = "OceanMesh"
-  view_tag_name: str = Field(default="MeshSize", description="Name of the view holding the mesh size at the nodes")
+  model_name: str = Field(default="OceanMesh", description="Name of the gmsh model (in the .msh file of --msh)")
   gmsh: GmshConfig = Field(default_factory=GmshConfig)
   mesh: MesherConfig = Field(default_factory=MesherConfig)
   domain: DomainConfig
@@ -247,9 +247,6 @@ class MeshGenerationConfig(ApplicationConfig):
   @model_validator(mode="after")
   def check_field_names(self) -> Self:
     _check_unique_field_types(self.fields, "mesh")
-    # Each field is also written as a view named after it.
-    if self.view_tag_name in [field.name for field in self.fields]:
-      raise ValueError(f"view_tag_name {self.view_tag_name!r} is also the name of a field")
     return self
 
 
@@ -259,8 +256,6 @@ class IcosahedralMeshConfig(ApplicationConfig):
   description: str = ""
   license: str = ""
   splits: NonNegativeInt
-  model_name: str = "IcosahedralMesh"
-  view_tag_name: str = Field(default="MeshSize", description="Name of the view holding the mesh size at the nodes")
 
 
 def field_arguments(field: BaseModel) -> dict[str, Any]:

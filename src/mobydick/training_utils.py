@@ -36,7 +36,6 @@ from mobydick import xarray_jax
 from mobydick.casting import Bfloat16Cast
 from mobydick.checkpoint import dump as ckpt_dump
 from mobydick.dataloader import InputsTargetsForcings
-from mobydick.geospatial_mesh_utils import read_mesh_data
 from mobydick.mask import Mask
 from mobydick.mesh_graph import MeshData
 from mobydick.models import MODELS
@@ -44,6 +43,7 @@ from mobydick.normalization import InputNormalization, OutputNormalization
 from mobydick.predictor_base import Predictor
 from mobydick.task import TaskConfig
 from mobydick.training_config import TrainingConfig
+from mobydick.ugrid import read_mesh_file
 
 logger = logging.getLogger(__name__)
 
@@ -126,12 +126,7 @@ def check_writable_paths(
 def get_mesh(configs: TrainingConfig) -> MeshData:
   mesh_data_path = configs.mesh.path
   logger.info(f"Loading mesh from {mesh_data_path}")
-  mesh_data = read_mesh_data(
-    mesh_data_path,
-    mesh_size_tag_name=configs.mesh.mesh_size_tag_name,
-    mesh_size_tag_step=configs.mesh.step,
-  )
-  return mesh_data
+  return read_mesh_file(mesh_data_path, configs.mesh.level)
 
 
 def get_model_config(configs: TrainingConfig) -> Any:

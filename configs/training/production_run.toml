@@ -103,9 +103,8 @@ uo = 1.0
 vo = 1.0
 
 [mesh]
-path = "/data/geometry/uniform_50km.msh"
-mesh_size_tag_name = "MeshSize"
-step = 0
+path = "/data/geometry/uniform_50km.nc"
+level = 0
 
 # Boolean (lat, lon) mask written by moby-dick download-mask (configs/download/mask.toml selects variable and level).
 [mask]

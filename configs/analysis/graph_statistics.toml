@@ -22,7 +22,7 @@ small_component_max_faces = 3
 # down; each decoder adds the coarser mesh's result to the finer mesh's state on the way up). Repeat the table for
 # each mesh.
 [[meshes]]
-path = "/data/geometry/uniform_50km.msh"
+path = "/data/geometry/uniform_50km.nc"
 message_passing_steps = 16
 
 # Pass/fail targets for the triangles of every processor mesh (no target on node degrees).

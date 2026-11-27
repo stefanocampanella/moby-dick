@@ -24,9 +24,9 @@ from scipy.spatial import ConvexHull, Delaunay
 from mobydick import basis_utils, icosahedral_mesh, mesh_connectivity
 from mobydick.basis import compute_grid_basis_command
 from mobydick.dataloader_utils import get_grid
-from mobydick.geospatial_mesh_utils import write_multi_mesh
 from mobydick.gis_utils import cartesian_crs, cartesian_unit_sphere_crs, equirectangular_crs, get_transform
 from mobydick.mesh_graph import TriangleMesh
+from mobydick.ugrid import write_mesh_file
 
 LAT = np.arange(-85.0, 90.0, 10.0)
 LON = np.arange(0.0, 360.0, 10.0)
@@ -210,8 +210,8 @@ def test_basis_against_the_stereographic_draft(cap_radius):
 def test_compute_cli(tmp_path, mask_path):
   """`moby-dick compute-grid-basis` reads the mesh and the mask written by moby-dick download-mask, and saves the basis
   on the ocean points of that grid; an existing output is replaced only with --overwrite."""
-  mesh_path = tmp_path / "mesh.msh"
-  write_multi_mesh(icosahedral_mesh.get_multi_mesh_data(1), mesh_path)
+  mesh_path = tmp_path / "mesh.nc"
+  write_mesh_file(mesh_path, [icosahedral_mesh.get_multi_mesh_data(1)])
   output = tmp_path / "basis.npz"
   arguments = [str(mesh_path), mask_path, str(output), "--log-level", "warning"]
 

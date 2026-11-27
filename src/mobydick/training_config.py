@@ -108,9 +108,8 @@ class TaskConfig(ApplicationConfig):
 
 
 class MeshConfig(ApplicationConfig):
-  path: str
-  mesh_size_tag_name: str = "MeshSize"
-  step: NonNegativeInt = Field(default=0, description="Mesh-size tag timestep")
+  path: str = Field(description="Mesh file (UGRID, NetCDF-4: make-ocean-mesh, make-icosahedral-mesh, combine-meshes)")
+  level: NonNegativeInt = Field(default=0, description="Mesh of the file the processor uses (0: the finest)")
 
 
 class SourceConfig(ApplicationConfig):

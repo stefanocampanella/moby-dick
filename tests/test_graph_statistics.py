@@ -49,6 +49,7 @@ from mobydick.mesh_graph import (
   longest_incident_edges,
   small_components,
 )
+from mobydick.ugrid import write_mesh_file
 
 
 def _grid(ocean_below: float = 70.0) -> Grid:
@@ -104,7 +105,7 @@ def _reach_matrix(built: list[graphs.Graph], steps: list[int]) -> np.ndarray:
 
 def _config(steps: list[int], **settings) -> config.GraphStatisticsConfig:
   """Settings for `cli.compute` on meshes already read (the paths are not opened)."""
-  meshes = [{"path": f"/mesh_{level}.msh", "message_passing_steps": s} for level, s in enumerate(steps)]
+  meshes = [{"path": f"/mesh_{level}.nc", "message_passing_steps": s} for level, s in enumerate(steps)]
   return config.GraphStatisticsConfig.model_validate({"mask": "/mask", "meshes": meshes, **settings})
 
 
@@ -453,10 +454,8 @@ def test_cli_prints_tables_and_writes_described_statistics(mask_path, tmp_path, 
   """moby-dick graph-statistics reads the mask and a mesh file, prints the summary tables to stdout and writes every
   quantity with a description; the icosahedral mesh covers every unmasked point of the synthetic grid in the encoder
   and the decoder. An existing output is kept."""
-  from mobydick.geospatial_mesh_utils import write_multi_mesh
-
-  mesh_path = tmp_path / "mesh.msh"
-  write_multi_mesh(icosahedral_mesh.get_multi_mesh_data(2), mesh_path)
+  mesh_path = tmp_path / "mesh.nc"
+  write_mesh_file(mesh_path, [icosahedral_mesh.get_multi_mesh_data(2)])
   config_path = write_config(
     {
       "mask": mask_path,
@@ -786,7 +785,7 @@ def test_regions_file_is_validated(tmp_path, write_config):
   settings = write_config(
     {
       "mask": "/mask",
-      "meshes": [{"path": "/m.msh", "message_passing_steps": 1}],
+      "meshes": [{"path": "/m.nc", "message_passing_steps": 1}],
       "basin_connections": [{"basin": "a", "ocean": "b"}],
     }
   )
@@ -885,11 +884,11 @@ def test_input_paths_must_be_absolute():
   on the directory the command runs from."""
   with pytest.raises(ValueError, match="not an absolute path"):
     config.GraphStatisticsConfig.model_validate(
-      {"mask": "mask", "meshes": [{"path": "/m.msh", "message_passing_steps": 1}]}
+      {"mask": "mask", "meshes": [{"path": "/m.nc", "message_passing_steps": 1}]}
     )
   with pytest.raises(ValueError, match="not an absolute path"):
     config.GraphStatisticsConfig.model_validate(
-      {"mask": "/mask", "meshes": [{"path": "m.msh", "message_passing_steps": 1}]}
+      {"mask": "/mask", "meshes": [{"path": "m.nc", "message_passing_steps": 1}]}
     )
 
 

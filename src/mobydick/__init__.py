@@ -22,6 +22,7 @@ from mobydick.basis import compute_grid_basis_command
 from mobydick.downloader import compute_tendency_std, download, download_mask
 from mobydick.geospatial_mesh import make_icosahedral_mesh, make_ocean_mesh
 from mobydick.training import train
+from mobydick.ugrid import combine_meshes
 
 # Commands imported only when they run (or --help lists them), for heavy imports no other command needs: name ->
 # (module, attribute).
@@ -85,6 +86,7 @@ def cli(
 cli.add_command(train)
 cli.add_command(make_ocean_mesh)
 cli.add_command(make_icosahedral_mesh)
+cli.add_command(combine_meshes)
 cli.add_command(compute_grid_basis_command)
 cli.add_command(download)
 cli.add_command(download_mask)

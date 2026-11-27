@@ -153,16 +153,16 @@ EOF
 # --- mesh_study.sh ------------------------------------------------------------------------------------------------
 
 @test "mesh_study.sh writes one config per case and seed from demo_5000.toml and submits each" {
-    touch "${BATS_TEST_TMPDIR}/geometry/uniform_120km.msh" "${BATS_TEST_TMPDIR}/geometry/icosahedral_6.msh"
+    touch "${BATS_TEST_TMPDIR}/geometry/uniform_120km.nc" "${BATS_TEST_TMPDIR}/geometry/icosahedral_6.nc"
     run "${PROJECT}/clusters/jupiter/slurm/mesh_study.sh" --account acc study 1,2 120km:8 icosahedral_6:16:4096:06:00:00
     assert_success
     local configs="${PROJECT}/runs/study/configs"
     local settings='^(seed|gnn_msg_steps|path = "/data/geometry/|edge_chunk_size)'
     run grep -E "${settings}" "${configs}/demo_5000_120km_msg8_seed2.toml"
-    assert_output "$(printf '%s\n' 'seed = 2' 'gnn_msg_steps = 8' 'path = "/data/geometry/uniform_120km.msh"' \
+    assert_output "$(printf '%s\n' 'seed = 2' 'gnn_msg_steps = 8' 'path = "/data/geometry/uniform_120km.nc"' \
         'edge_chunk_size = 0')"
     run grep -E "${settings}" "${configs}/demo_5000_icosahedral_6_msg16_seed1.toml"
-    assert_output "$(printf '%s\n' 'seed = 1' 'gnn_msg_steps = 16' 'path = "/data/geometry/icosahedral_6.msh"' \
+    assert_output "$(printf '%s\n' 'seed = 1' 'gnn_msg_steps = 16' 'path = "/data/geometry/icosahedral_6.nc"' \
         'edge_chunk_size = 4096')"
     run calls
     assert_equal "${#lines[@]}" 4
@@ -174,7 +174,7 @@ study_demo_5000_120km_msg8_seed1 study_demo_5000_120km_msg8_seed1"
 }
 
 @test "mesh_study.sh points the jobs at the code of its own checkout" {
-    touch "${BATS_TEST_TMPDIR}/geometry/uniform_50km.msh"
+    touch "${BATS_TEST_TMPDIR}/geometry/uniform_50km.nc"
     run "${PROJECT}/clusters/jupiter/slurm/mesh_study.sh" study 42 50km:16
     assert_success
     run grep '^APPTAINERENV_PYTHONPATH=' "${PROJECT}/runs/study/configs/study.env"
@@ -186,7 +186,7 @@ study_demo_5000_120km_msg8_seed1 study_demo_5000_120km_msg8_seed1"
 @test "mesh_study.sh fails on a missing mesh or a case without message passing steps, before submitting" {
     run "${PROJECT}/clusters/jupiter/slurm/mesh_study.sh" study 1 75km:8
     assert_failure 1
-    assert_output --partial "no mesh uniform_75km.msh or 75km.msh in ${BATS_TEST_TMPDIR}/geometry"
+    assert_output --partial "no mesh uniform_75km.nc or 75km.nc in ${BATS_TEST_TMPDIR}/geometry"
     run "${PROJECT}/clusters/jupiter/slurm/mesh_study.sh" study 1 75km
     assert_failure 1
     assert_output --partial 'no message passing steps in 75km'
