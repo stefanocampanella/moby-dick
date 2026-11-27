@@ -14,8 +14,6 @@
 # limitations under the License.
 """Tests of the data parallel wrapper (sharding.py) on a tiny Leviathan, over 4 CPU devices (see conftest.py)."""
 
-import sys
-
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -90,10 +88,9 @@ def test_data_parallel_predictions_equal_the_plain_ones(mesh, tiny_model):
   params = plain.init(jax.random.key(0), inputs, targets, forcings)
   expected = plain.apply(params, None, inputs, targets, forcings)
   actual = jax.jit(lambda p, i, t, f: wrapped.apply(p, None, i, t, f))(params, inputs, targets, forcings)
-  # The jitted, sharded predictions and the eager ones sum in different orders (XLA fuses and reorders reductions): on
-  # some CPU backends one value in a few hundred differs by ~7e-5, as for the gradients above.
-  rtol = 1e-4 if sys.platform == "darwin" else 1e-5
-  np.testing.assert_allclose(actual.zos.data, expected.zos.data, rtol=rtol, atol=1e-6)
+  # The jitted, sharded predictions and the eager ones sum in different orders (XLA fuses and reorders reductions): one
+  # value in a few hundred can differ by 4e-5 to 7e-5 (seen on two CPU backends), as for the gradients above.
+  np.testing.assert_allclose(actual.zos.data, expected.zos.data, rtol=1e-4, atol=1e-6)
 
 
 class _NoisyPredictor(predictor_base.Predictor):

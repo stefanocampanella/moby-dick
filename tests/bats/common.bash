@@ -34,9 +34,10 @@ common_setup() {
     mkdir -p "${HOME}"
 }
 
-# A stand-in for a command, first on PATH: it records its name and arguments, one call per line, in $CALLS, each
-# argument quoted for the shell (`printf %q`: an argument with a space reads `a\ b`, so that a split or lost argument
-# shows), then runs BODY (shell code; "$@" are its arguments). Usage: stub NAME [BODY].
+# A stand-in for a command, first on PATH: it records its name and arguments, one call per line, in $CALLS, then runs
+# BODY (shell code; "$@" are its arguments). An argument that is empty or holds whitespace is recorded in single
+# quotes ('a b'), so that a split or lost argument shows; the others as they are (not with printf %q, whose escapes
+# differ between bash versions, e.g. for commas). Usage: stub NAME [BODY].
 stub() {
     stub_at "${STUBS}/$1" "${2:-}"
 }
@@ -47,8 +48,9 @@ stub_at() {
     mkdir -p "$(dirname "$1")"
     {
         echo '#!/usr/bin/env bash'
-        # A loop, not printf ' %q' "$@": printf repeats its format once even without arguments.
-        echo "{ printf %s $(basename "$1"); for a in \"\$@\"; do printf ' %q' \"\$a\"; done; echo; } >> \"\${CALLS}\""
+        echo "{ printf %s $(basename "$1"); for a in \"\$@\"; do"
+        echo "    if [[ -z \$a || \$a == *[[:space:]]* ]]; then printf \" '%s'\" \"\$a\"; else printf ' %s' \"\$a\"; fi"
+        echo "done; echo; } >> \"\${CALLS}\""
         printf '%s\n' "${2:-}"
     } > "$1"
     chmod +x "$1"

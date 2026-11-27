@@ -46,7 +46,7 @@ EOF
     run calls
     assert_line --index 2 --regexp "^srun --export=ALL --kill-on-bad-exit=1 --output=${PROJECT}/logs/training/%j_%N_%t.out \
 --error=${PROJECT}/logs/training/%j_%N_%t.err ${PROJECT}/scripts/train.sh --project-dir ${PROJECT} --continue --bind \
-a\\\\ b:/data/x --log-level debug demo model ckpt$"
+'a b:/data/x' --log-level debug demo model ckpt$"
     assert_line --index 3 'DATASET=/site/dataset SRUN_CPUS_PER_TASK=72'
 }
 
