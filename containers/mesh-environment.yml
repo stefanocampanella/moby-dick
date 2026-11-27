@@ -15,6 +15,7 @@ dependencies:
   # is only on gmsh's branch valence-repair-2d: switch when released.
   - gmsh=4.15.2
   - python-gmsh=4.15.2
-  # seamsh compiles its C library when it is installed.
+  # seamsh compiles its C library when it is installed, from the git tag pinned in pyproject.toml.
   - c-compiler
+  - git
   - pip

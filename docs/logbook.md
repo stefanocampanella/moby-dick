@@ -1876,6 +1876,7 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - conda-forge has GDAL 3.13.1 and gmsh 4.15.2 for linux-aarch64, which the seamsh notes had left unchecked.
   - A core-only environment on the laptop passes the tests, with the three mesh modules skipped.
   - The images were not built: there is no Apptainer on the laptop.
+
 ## 2026-11-28 09:40: the mesh files did not open in QGIS or ParaView
 
 - **Request:** the maintainer tried the new mesh files in ParaView and QGIS; both failed.

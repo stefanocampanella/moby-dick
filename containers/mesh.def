@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The mesh image: moby-dick with the `mesh` extra (gmsh, seamsh) on conda-forge, without NVIDIA's software, for
-# `moby-dick make-ocean-mesh` and the mesh tests. It combines GPL code (gmsh GPL-2.0-or-later, seamsh GPL-3.0) with
+# `moby-dick make-ocean-mesh` and the mesh tests. It combines GPL code (gmsh GPL-2.0-or-later, seamsh 0.6.0+fork
+# GPL-3.0-or-later, its License-Expression) with
 # moby-dick (Apache-2.0): distribute it as a GPL-3.0-or-later combination, with the sources at the commits of the labels
 # and the license texts in /licenses. Build it from the repository root:
 #
@@ -20,24 +21,34 @@ From: mambaorg/micromamba:2.10.0
   LICENSES /licenses/moby-dick
   NOTICE /licenses/moby-dick/NOTICE
 
-%post
-  micromamba create --yes --name mesh --file /app/mesh-environment.yml
+# bash, not the default /bin/sh (dash in this image); no activation: the environment's binaries by their paths.
+%post -c /bin/bash
+  set -euo pipefail
+  export MAMBA_ROOT_PREFIX=/opt/conda
+  micromamba create --yes --root-prefix /opt/conda --name mesh --file /app/mesh-environment.yml
+  # The license texts of the conda packages (gmsh, GDAL, PROJ, ...), from the package cache, before cleaning it.
+  for info in /opt/conda/pkgs/*/info/licenses; do
+    package=$(basename "$(dirname "$(dirname "$info")")")
+    mkdir -p "/licenses/conda/$package"
+    cp -r "$info/." "/licenses/conda/$package/"
+  done
   micromamba clean --all --yes
-  eval "$(micromamba shell hook --shell bash)"
-  micromamba activate mesh
-  pip install --upgrade "pip >= 25.1"
-  pip install "/app[mesh]" --group /app/pyproject.toml:dev
+  python=/opt/conda/envs/mesh/bin/python
+  "$python" -m pip install --upgrade "pip >= 25.1"
+  "$python" -m pip install "/app[mesh]" --group /app/pyproject.toml:dev
   # gmsh must be conda-forge's release, not a wheel pip installed in its place.
-  python -c "import gmsh, seamsh; assert gmsh.__version__ == '4.15.2', gmsh.__version__" || exit 1
-  python -c "from osgeo import gdal_array" || exit 1
-  # seamsh's license texts (its source is at the commit of its pin in pyproject.toml).
-  mkdir -p /licenses/seamsh
-  python - <<'PY'
+  "$python" -c "import gmsh, seamsh; assert gmsh.__version__ == '4.15.2', gmsh.__version__"
+  "$python" -c "from osgeo import gdal_array"
+  # seamsh's license texts, with their relative paths (its source is at the tag of its pin in pyproject.toml).
+  "$python" - <<'PY'
 import importlib.metadata, pathlib, shutil
 distribution = importlib.metadata.distribution("seamsh")
 for file in distribution.files or []:
-  if "licen" in file.name.lower() or "copying" in file.name.lower():
-    shutil.copy(distribution.locate_file(file), pathlib.Path("/licenses/seamsh") / file.name)
+  parts = pathlib.PurePath(file).parts
+  if "licenses" in parts:
+    target = pathlib.Path("/licenses/seamsh", *parts[parts.index("licenses") + 1 :])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(distribution.locate_file(file), target)
 PY
 
 %environment

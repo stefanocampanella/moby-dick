@@ -36,7 +36,7 @@ LAZY_COMMANDS = {
 OPTIONAL_DEPENDENCIES = {"mesh": {"gmsh", "seamsh"}}
 
 
-def _missing_extra_command(name: str, extra: str, error: ImportError) -> click.Command:
+def _missing_extra_command(name: str, extra: str, error: Exception) -> click.Command:
   """A stand-in for a command whose optional dependencies are not installed: it says which extra to install."""
 
   @click.command(name, context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
@@ -66,6 +66,12 @@ class BannerGroup(click.Group):
       except ImportError as error:
         # Only a missing optional dependency, not a bug in the module.
         if extra is None or error.name not in OPTIONAL_DEPENDENCIES[extra]:
+          raise
+        command = _missing_extra_command(cmd_name, extra, error)
+      except OSError as error:
+        # An optional dependency whose native libraries are missing (gmsh's wheel without libGLU, say): help still
+        # lists every command, and this one says why it cannot run.
+        if extra is None:
           raise
         command = _missing_extra_command(cmd_name, extra, error)
       self.add_command(command, cmd_name)

@@ -147,8 +147,8 @@ grants no rights to the names of DeepMind, Google or GraphCast, which are used h
 the work. Licensing follows the [REUSE specification](https://reuse.software/spec-3.3/).
 
 Third-party software:
-- **Mesh generation:** the optional `mesh` extra installs gmsh (GPL-2.0-or-later) and seamsh (GPL-3.0). Only
-  `moby-dick make-ocean-mesh` loads them (`mobydick.meshing`). The mesh image (`containers/mesh.def`) combines them
+- **Mesh generation:** the optional `mesh` extra installs gmsh (GPL-2.0-or-later) and seamsh (GPL-3.0-or-later as
+  of 0.6.0+fork). Only `moby-dick make-ocean-mesh` loads them (`mobydick.meshing`). The mesh image (`containers/mesh.def`) combines them
   with moby-dick and is distributed under GPL-3.0-or-later terms.
 - **Training image:** it is built on NVIDIA's JAX container, under NVIDIA's own terms, and holds no GPL code. Its
   recipe (`spack.yaml`, `spack/templates/container/moby-dick.def`) is published, not the image: whoever builds it

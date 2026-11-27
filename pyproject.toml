@@ -161,3 +161,9 @@ extra-paths = ["src"]
 [tool.ty.src]
 # Submodules of the shell tests (bats-core's documentation has Python files).
 exclude = ["tests/bats/helpers"]
+
+# gmsh and seamsh are the optional `mesh` extra: without it (e.g. in the training image) their imports cannot be
+# resolved, only in the mesh generator and its tests.
+[[tool.ty.overrides]]
+include = ["src/mobydick/meshing/**", "tests/test_ocean_mesh.py", "tests/test_mesh_size_fields.py"]
+rules = { unresolved-import = "ignore" }

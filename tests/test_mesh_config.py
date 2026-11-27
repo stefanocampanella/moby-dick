@@ -29,7 +29,6 @@ from mobydick.mesh_config import (
 )
 
 MESH_CONFIGS = pathlib.Path(__file__).parents[1] / "configs" / "mesh"
-COAST_LATITUDE = -70.0
 UNIFORM_COARSENING = {"name": "uniform", "value": 200_000.0}
 MINIMAL = {
   "domain": {"filepath": "coast.shp"},

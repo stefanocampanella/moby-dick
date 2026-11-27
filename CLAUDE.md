@@ -25,8 +25,9 @@ NVIDIA JAX container `nvcr.io/nvidia/jax:26.09-py3` plus GDAL/PROJ from Spack). 
   stderr, on rank 0 only, `MOBYDICK_NO_BANNER=1` to silence it; `python -m mobydick` works too): `moby-dick train CONFIG.toml OUTPUT TRAIN_CKPT`,
   `moby-dick make-ocean-mesh CONFIG.toml OUTPUT.nc [--msh FILE]` (mesh from `configs/mesh/*.toml`, written as a mesh
   file, see "Mesh files" below; `--msh` also writes the mesh alone in gmsh's format, for viewing; paths are container
-  paths, as in the training configs: run it in the image with the data mounted, e.g. `apptainer exec --bind
-  data/geometry:/data/geometry moby-dick.sif python -m mobydick make-ocean-mesh configs/mesh/uniform_120km.toml
+  paths, as in the training configs: run it in the mesh image (`containers/mesh.def`; the training image has no
+  gmsh since 27 Nov 2026) with the data mounted, e.g. `apptainer exec --bind data/geometry:/data/geometry
+  moby-dick-mesh.sif moby-dick make-ocean-mesh configs/mesh/uniform_120km.toml
   /data/geometry/uniform_120km.nc`; the `lambrechts*` configs also need the bathymetry at `/data/bathymetry`; the
   coastline coarsening is the minimum of `[[coarsen_boundaries.fields]]`, like the mesh size of `[[fields]]`; there is
   no `--data-path` since 12 Nov 2026), `moby-dick combine-meshes OUTPUT.nc FINE.nc COARSE.nc ...` (mesh files of one
