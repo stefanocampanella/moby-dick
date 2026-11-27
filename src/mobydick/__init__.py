@@ -20,13 +20,32 @@ from absl import flags
 from mobydick.banner import print_banner
 from mobydick.basis import compute_grid_basis_command
 from mobydick.downloader import compute_tendency_std, download, download_mask
-from mobydick.geospatial_mesh import make_icosahedral_mesh, make_ocean_mesh
+from mobydick.mesh_commands import combine_meshes, make_icosahedral_mesh
 from mobydick.training import train
-from mobydick.ugrid import combine_meshes
 
-# Commands imported only when they run (or --help lists them), for heavy imports no other command needs: name ->
-# (module, attribute).
-LAZY_COMMANDS = {"graph-statistics": ("mobydick.graph_statistics.cli", "graph_statistics_command")}
+# Commands imported only when they run (or --help lists them), for heavy imports no other command needs, or for
+# optional dependencies: name -> (module, attribute, extra that provides its dependencies or None).
+LAZY_COMMANDS = {
+  "graph-statistics": ("mobydick.graph_statistics.cli", "graph_statistics_command", None),
+  # gmsh and seamsh (GPL) only in the `mesh` extra: see mobydick.meshing.
+  "make-ocean-mesh": ("mobydick.meshing.geospatial_mesh", "make_ocean_mesh", "mesh"),
+}
+
+
+# The top-level modules each extra installs (pyproject.toml).
+OPTIONAL_DEPENDENCIES = {"mesh": {"gmsh", "seamsh"}}
+
+
+def _missing_extra_command(name: str, extra: str, error: ImportError) -> click.Command:
+  """A stand-in for a command whose optional dependencies are not installed: it says which extra to install."""
+
+  @click.command(name, context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+  def command():
+    raise click.ClickException(f'{name} needs the {extra} extra ({error}): pip install "moby-dick[{extra}]"')
+
+  command.help = f"(Not installed: needs the {extra} extra.)"
+  command.short_help = command.help
+  return command
 
 
 class BannerGroup(click.Group):
@@ -41,8 +60,15 @@ class BannerGroup(click.Group):
 
   def get_command(self, ctx, cmd_name):
     if cmd_name in LAZY_COMMANDS and cmd_name not in self.commands:
-      module, attribute = LAZY_COMMANDS[cmd_name]
-      self.add_command(getattr(importlib.import_module(module), attribute), cmd_name)
+      module, attribute, extra = LAZY_COMMANDS[cmd_name]
+      try:
+        command = getattr(importlib.import_module(module), attribute)
+      except ImportError as error:
+        # Only a missing optional dependency, not a bug in the module.
+        if extra is None or error.name not in OPTIONAL_DEPENDENCIES[extra]:
+          raise
+        command = _missing_extra_command(cmd_name, extra, error)
+      self.add_command(command, cmd_name)
     return super().get_command(ctx, cmd_name)
 
   def make_context(self, *args, **kwargs):
@@ -84,7 +110,6 @@ def cli(
 
 
 cli.add_command(train)
-cli.add_command(make_ocean_mesh)
 cli.add_command(make_icosahedral_mesh)
 cli.add_command(combine_meshes)
 cli.add_command(compute_grid_basis_command)

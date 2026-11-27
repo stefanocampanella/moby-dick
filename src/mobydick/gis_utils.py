@@ -187,8 +187,8 @@ osr.UseExceptions()
 
 
 class CoordinateReferenceSystem(osr.SpatialReference):
-  # Dumb hack: StereoMeshSizeField in geospatial_mesh_utils.py exists to be used as a callback inside seamsh functions,
-  # which will pass an `osr.SpatialReference`.
+  # Dumb hack: StereoMeshSizeField in meshing/geospatial_mesh_utils.py exists to be used as a callback inside seamsh
+  # functions, which will pass an `osr.SpatialReference`.
   # However, pyproj.Transformer.from_crs (used in `get_transform` and hence in StereoMeshSizeField objects) expects an
   # object with a `to_wkt` method, so `CoordinateReferenceSystem` has been defined here.
   # An alternative way of switching between the two is to get a `projection_crs` of type CoordinateReferenceSystem

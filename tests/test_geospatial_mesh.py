@@ -22,7 +22,7 @@ import pytest
 from click.testing import CliRunner
 
 from mobydick import icosahedral_mesh
-from mobydick.geospatial_mesh import make_icosahedral_mesh
+from mobydick.mesh_commands import make_icosahedral_mesh
 from mobydick.ugrid import read_mesh_file
 
 SPLITS = 2

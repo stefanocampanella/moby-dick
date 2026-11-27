@@ -20,12 +20,11 @@ spack:
   container:
     os_packages:
       command: apt
+      # No gmsh: mesh generation (the `mesh` extra, GPL) has its own image, containers/mesh.def.
       final:
-        - gmsh
         - python3
         - python3-venv
         - python3-pip
-        - python3-gmsh
     format: singularity
     template: container/moby-dick.def
     images:

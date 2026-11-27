@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026 Stefano Campanella
+# SPDX-License-Identifier: Apache-2.0
+#
+# The mesh image: moby-dick with the `mesh` extra (gmsh, seamsh) on conda-forge, without NVIDIA's software, for
+# `moby-dick make-ocean-mesh` and the mesh tests. It combines GPL code (gmsh GPL-2.0-or-later, seamsh GPL-3.0) with
+# moby-dick (Apache-2.0): distribute it as a GPL-3.0-or-later combination, with the sources at the commits of the labels
+# and the license texts in /licenses. Build it from the repository root:
+#
+#     apptainer build moby-dick-mesh.sif containers/mesh.def
+
+Bootstrap: docker
+# A pinned release of the micromamba image (update together with the environment file).
+From: mambaorg/micromamba:2.10.0
+
+%files
+  containers/mesh-environment.yml /app/mesh-environment.yml
+  pyproject.toml /app/pyproject.toml
+  README.md /app/README.md
+  src/mobydick /app/src/mobydick
+  LICENSES /licenses/moby-dick
+  NOTICE /licenses/moby-dick/NOTICE
+
+%post
+  micromamba create --yes --name mesh --file /app/mesh-environment.yml
+  micromamba clean --all --yes
+  eval "$(micromamba shell hook --shell bash)"
+  micromamba activate mesh
+  pip install --upgrade "pip >= 25.1"
+  pip install "/app[mesh]" --group /app/pyproject.toml:dev
+  # gmsh must be conda-forge's release, not a wheel pip installed in its place.
+  python -c "import gmsh, seamsh; assert gmsh.__version__ == '4.15.2', gmsh.__version__" || exit 1
+  python -c "from osgeo import gdal_array" || exit 1
+  # seamsh's license texts (its source is at the commit of its pin in pyproject.toml).
+  mkdir -p /licenses/seamsh
+  python - <<'PY'
+import importlib.metadata, pathlib, shutil
+distribution = importlib.metadata.distribution("seamsh")
+for file in distribution.files or []:
+  if "licen" in file.name.lower() or "copying" in file.name.lower():
+    shutil.copy(distribution.locate_file(file), pathlib.Path("/licenses/seamsh") / file.name)
+PY
+
+%environment
+  export MAMBA_ROOT_PREFIX=/opt/conda
+  export PATH=/opt/conda/envs/mesh/bin:$PATH
+
+%labels
+  org.opencontainers.image.title moby-dick mesh image
+  org.opencontainers.image.licenses GPL-3.0-or-later
+  org.opencontainers.image.source https://github.com/stefanocampanella/moby-dick
+  seamsh.source https://github.com/stefanocampanella/seamsh
+
+%runscript
+  exec moby-dick "$@"

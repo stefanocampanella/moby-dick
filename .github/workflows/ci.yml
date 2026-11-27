@@ -1,14 +1,16 @@
 # SPDX-FileCopyrightText: 2026 Stefano Campanella
 # SPDX-License-Identifier: Apache-2.0
 
-# Five independent jobs, each with its own status:
+# Six independent jobs, each with its own status:
 # - lint: the pre-commit hooks that need no project environment (ruff check, ruff format, ShellCheck);
 # - reuse: copyright and license of every file (REUSE);
 # - secrets: gitleaks over the whole git history (the pre-commit hook checks only staged changes);
 # - bats: the tests of the shell scripts (tests/bats, bats-core from the submodules there);
-# - tests: ty and the test suite with coverage (pytest --cov, 80 % gate), on CPU. GDAL comes from conda-forge at the
-#   version of the container image (spack.yaml), with the PROJ it needs; the Python dependencies from PyPI, as in the
-#   image.
+# - tests: ty and the test suite with coverage (pytest --cov, 80 % gate), on CPU, with the mesh extra. GDAL and gmsh
+#   come from conda-forge, from the environment file of the mesh image (containers/mesh-environment.yml), the Python
+#   dependencies from PyPI, as in the images;
+# - core: the package without the mesh extra (as the training image installs it): no command but make-ocean-mesh may
+#   load gmsh or seamsh, and the tests pass with the mesh tests skipped.
 # Hook versions live in .pre-commit-config.yaml only, except gitleaks in the secrets job (a release binary: keep its
 # version in sync with the hook's rev).
 name: CI
@@ -127,20 +129,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: System libraries of the gmsh wheel
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libglu1-mesa libxcursor1 libxft2 libxinerama1 libxrender1
-
       - uses: mamba-org/setup-micromamba@v3
         with:
-          environment-name: moby-dick
-          # Keep GDAL in sync with spack.yaml. PROJ is not pinned: conda-forge's GDAL 3.13.1 needs PROJ >= 9.8.1, while
-          # the image has PROJ 9.7.0 (its pyproj wheel bundles 9.8.1); the next step prints the versions.
-          create-args: >-
-            --override-channels -c conda-forge
-            python=3.12 gdal=3.13.1 pip
+          # The mesh image's environment (GDAL in sync with spack.yaml, gmsh's release). PROJ is not pinned: conda-forge's
+          # GDAL 3.13.1 needs PROJ >= 9.8.1, while the training image has PROJ 9.7.0 (its pyproj wheel bundles 9.8.1);
+          # a later step prints the versions.
+          environment-file: containers/mesh-environment.yml
           cache-environment: true
 
       - uses: actions/cache@v6
@@ -148,12 +142,14 @@ jobs:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
 
-      - name: Install the package and the dev group
+      - name: Install the package with the mesh extra and the dev group
         id: install
         run: |
           # Dependency groups need pip >= 25.1.
           python -m pip install --upgrade "pip >= 25.1"
-          python -m pip install -e . --group dev
+          python -m pip install -e ".[mesh]" --group dev
+          # gmsh is conda-forge's, not a wheel installed in its place.
+          python -c "import gmsh; print('gmsh', gmsh.__version__); assert gmsh.__version__ == '4.15.2'"
 
       - name: GDAL, PROJ and pyproj versions (compare with the image)
         run: |
@@ -200,3 +196,49 @@ jobs:
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      # GDAL only, as the training image has it (no gmsh).
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: moby-dick-core
+          create-args: >-
+            --override-channels -c conda-forge
+            python=3.12 gdal=3.13.1 pip
+          cache-environment: true
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/pip
+          key: pip-core-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install the package without the mesh extra
+        run: |
+          python -m pip install --upgrade "pip >= 25.1"
+          python -m pip install -e . --group dev
+
+      - name: No mesh generator is installed or loaded
+        run: |
+          python - <<'EOF'
+          import importlib.util
+          import sys
+
+          installed = [m for m in ("gmsh", "seamsh") if importlib.util.find_spec(m)]
+          assert not installed, f"installed without the mesh extra: {installed}"
+          import mobydick, mobydick.training, mobydick.graph_statistics.cli  # noqa: E401, F401
+
+          loaded = sorted({"gmsh", "seamsh"} & set(sys.modules))
+          assert not loaded, loaded
+          EOF
+          moby-dick --help
+
+      - name: Tests (the mesh tests skip)
+        run: python -m pytest

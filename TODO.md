@@ -21,11 +21,9 @@
   * `read_mesh`'s removal of nodes in no triangle: goes with the `.msh` reader (UGRID mesh files). **Medium
     priority**
 * Licensing (audit of 12 Nov 2026, details in CLAUDE.md, Repository notes, Dependencies). One PR:
-  * Keep GPL code out of training: gmsh (GPL-2.0-or-later) and seamsh (GPL-3.0) as an optional `meshing` extra,
-    imported lazily by `make-ocean-mesh` only (today `mobydick/__init__.py` imports `geospatial_mesh`, so every command
-    loads them), and `.msh` files read without gmsh (meshio, MIT, or a small msh 4.1 reader: nodes, triangles, boundary
-    lines, `multi_mesh_edges`, `NodeData` views, the `Projection` attribute), checked against today's `read_mesh_data`
-    on every mesh in `data/geometry`. Then a training image needs neither, and distributing it raises no GPL questions.
+  * ~~Keep GPL code out of training: the `mesh` extra, imported lazily by `make-ocean-mesh` only; UGRID mesh files
+    read without gmsh~~ (27 Nov 2026). Left: build the mesh image (`containers/mesh.def`) and the training image without
+    gmsh on JUPITER, regenerate the meshes there, run the tests in both images.
   * Read NVIDIA's container terms (`/workspace/license.txt` in the image) before sharing `moby-dick.sif` outside the
     project.
   * Decide the license of the mesh files (CC BY-NC-SA 4.0 in every mesh config without a reason from the inputs) and of
