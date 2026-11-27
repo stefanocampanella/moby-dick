@@ -213,6 +213,13 @@ def test_missing_levels_and_links_are_errors(tmp_path):
     ugrid.read_links(path, 0, 2)
   with pytest.raises(ValueError, match="No mesh"):
     ugrid.write_mesh_file(tmp_path / "empty.nc", [])
+  # A hierarchy written before the links held `_inside` is to be regenerated.
+  hierarchy, old = tmp_path / "hierarchy.nc", tmp_path / "old.nc"
+  ugrid.write_mesh_file(hierarchy, [icosahedral_mesh.get_multi_mesh_data(2), icosahedral_mesh.get_multi_mesh_data(1)])
+  with xr.open_dataset(hierarchy, engine="h5netcdf", decode_cf=False) as dataset:
+    dataset.drop_vars(["mesh0_node_in_mesh1_inside"]).to_netcdf(old, engine="h5netcdf")
+  with pytest.raises(ValueError, match="regenerate"):
+    ugrid.read_links(old, 0, 1)
 
 
 def test_combine_meshes(tmp_path):

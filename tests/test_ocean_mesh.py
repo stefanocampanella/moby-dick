@@ -356,12 +356,14 @@ def test_one_config_makes_a_hierarchy(channel_coastline):
 
 
 def test_the_levels_of_a_hierarchy_must_be_finest_first(channel_coastline):
-  """Levels given coarsest first are refused after meshing, with the median edges, and nothing is written."""
+  """Levels given coarsest first are refused after meshing, with the median edges, and nothing is written (neither the
+  mesh file nor the gmsh files of --msh, so that a corrected run needs no --overwrite)."""
   config = _hierarchy_config(
     channel_coastline,
     [("coarse", 400_000.0, 800_000.0, "[[90.0, 0.0]]"), ("fine", 200_000.0, 300_000.0, "[[90.0, 0.0]]")],
   )
   output = channel_coastline / "reversed.nc"
-  result = CliRunner().invoke(make_ocean_mesh, [str(config), str(output), "--log-level", "warning"])
+  arguments = [str(config), str(output), "--msh", str(channel_coastline / "reversed.msh"), "--log-level", "warning"]
+  result = CliRunner().invoke(make_ocean_mesh, arguments)
   assert result.exit_code != 0 and "finest first" in result.output
-  assert not output.exists()
+  assert not output.exists() and not list(channel_coastline.glob("reversed*.msh"))

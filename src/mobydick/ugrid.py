@@ -43,10 +43,10 @@ field) is stored as a scalar and read back at every node: QGIS 3.44 crashes on s
 Between two consecutive levels a (finer) and b (coarser), both ways: `mesh<a>_node_in_mesh<b>_face` (the face of
 mesh b closest to each node of mesh a: containing it, or nearest for a node outside mesh b),
 `mesh<a>_node_in_mesh<b>_weights` (the barycentric coordinates of the closest point in that face, of its three nodes
-in the order of `mesh<b>_face_nodes`), `mesh<a>_node_in_mesh<b>_distance` (metres; inside, at most the sag of the flat
-faces below the surface, r² / 2R for a face of circumradius r; more outside) and `mesh<a>_node_in_mesh<b>_inside` (1 when the node is within mesh b:
-its distance is at most that sag, `basis_utils.within_mesh`). These are the
-mesh-to-mesh decoder connectivity (3 edges per receiver) and the weights of an interpolating decoder.
+in the order of `mesh<b>_face_nodes`), `mesh<a>_node_in_mesh<b>_distance` (metres; inside, at most the sag of the
+flat faces below the surface; more outside) and `mesh<a>_node_in_mesh<b>_inside` (1 when the node is within mesh b:
+its distance is at most that sag, `basis_utils.within_mesh`). These are the mesh-to-mesh decoder connectivity (3 edges
+per receiver) and the weights of an interpolating decoder.
 """
 
 import logging
@@ -341,6 +341,8 @@ def read_links(
   with xr.open_dataset(path, engine="h5netcdf") as dataset:
     if f"{name}_face" not in dataset:
       raise ValueError(f"{path} has no links between levels {level} and {other}")
+    if f"{name}_inside" not in dataset:
+      raise ValueError(f"{path} was written before the links held `_inside` (27 Nov 2026): regenerate it")
     nodes = f"{level_name(level)}_nNodes"
     return (
       _node_values(dataset, f"{name}_face", nodes),

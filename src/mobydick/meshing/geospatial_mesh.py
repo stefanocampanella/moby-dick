@@ -145,14 +145,15 @@ def msh_paths(msh_path: pathlib.Path, levels: int) -> list[pathlib.Path]:
 
 
 def mesh_level(
-  configs: MeshGenerationConfig, level: LevelConfig, domain, number: int, msh_path: pathlib.Path | None
-) -> tuple[MeshData, dict[str, np.ndarray]]:
+  configs: MeshGenerationConfig, level: LevelConfig, domain, number: int
+) -> tuple[MeshData, dict[str, np.ndarray], str]:
   """Mesh one level: coarsen the coastline of `domain` with the level's settings and seeds, mesh it with gmsh in a
   model of its own, and return the mesh (nodes of the triangles only, boundary from the faces) with its size fields at
-  the nodes; also write the gmsh model to `msh_path` if given."""
+  the nodes, and the name of the gmsh model (left in gmsh, for `write_msh`)."""
   label = level.name or f"level {number}"
   logger.info(f"{label}: coarsening the coastline and meshing")
-  gmsh.model.add(f"{configs.model_name}_{number}")
+  model = f"{configs.model_name}_{number}"
+  gmsh.model.add(model)
   boundary = coarsen_boundaries(
     domain,
     level.coarsen_boundaries.fields,
@@ -182,16 +183,19 @@ def mesh_level(
   fields: dict[str, np.ndarray] = {
     str(name): field.mesh_size_3d(vertices, projection=cartesian) for name, field in mesh_size.fields.items()
   }
-  if msh_path is not None:
-    logger.info(f"Writing {label} in gmsh's format to {msh_path}")
-    if configs.license:
-      gmsh.model.setAttribute("license", [configs.license])
-    if configs.description:
-      gmsh.model.setAttribute("description", [configs.description])
-    msh_path.parent.mkdir(parents=True, exist_ok=True)
-    gmsh.write(str(msh_path))
-  gmsh.model.remove()
-  return mesh, fields
+  return mesh, fields, model
+
+
+def write_msh(configs: MeshGenerationConfig, model: str, path: pathlib.Path) -> None:
+  """Write the gmsh model `model` (one level) to `path` in gmsh's format, with the license and description."""
+  gmsh.model.setCurrent(model)
+  logger.info(f"Writing {model} in gmsh's format to {path}")
+  if configs.license:
+    gmsh.model.setAttribute("license", [configs.license])
+  if configs.description:
+    gmsh.model.setAttribute("description", [configs.description])
+  path.parent.mkdir(parents=True, exist_ok=True)
+  gmsh.write(str(path))
 
 
 def write_ocean_mesh(
@@ -218,13 +222,23 @@ def write_ocean_mesh(
   )
   levels = configs.mesh_levels()
   paths: list[pathlib.Path | None] = list(msh_paths(msh_path, len(levels))) if msh_path else [None] * len(levels)
-  meshes, size_fields = [], []
-  for number, (level, path) in enumerate(zip(levels, paths, strict=True)):
-    mesh, fields = mesh_level(configs, level, domain, number, path)
-    meshes.append(mesh)
-    size_fields.append(fields)
-  lengths = [median_edge_length(mesh.mesh_graph) for mesh in meshes]
-  if any(coarser < finer for finer, coarser in itertools.pairwise(lengths)):
-    km = ", ".join(f"{length / 1e3:.1f}" for length in lengths)
-    raise LevelOrderError(f"The levels must be given finest first; their median edges are {km} km")
-  write_mesh_file(output_path, meshes, size_fields)
+  meshes, size_fields, models = [], [], []
+  try:
+    for number, level in enumerate(levels):
+      mesh, fields, model = mesh_level(configs, level, domain, number)
+      meshes.append(mesh)
+      size_fields.append(fields)
+      models.append(model)
+    # Checked before anything is written: no output is left behind by a refused hierarchy.
+    lengths = [median_edge_length(mesh.mesh_graph) for mesh in meshes]
+    if any(coarser < finer for finer, coarser in itertools.pairwise(lengths)):
+      km = ", ".join(f"{length / 1e3:.1f}" for length in lengths)
+      raise LevelOrderError(f"The levels must be given finest first; their median edges are {km} km")
+    write_mesh_file(output_path, meshes, size_fields)
+    for model, path in zip(models, paths, strict=True):
+      if path is not None:
+        write_msh(configs, model, path)
+  finally:
+    for model in models:
+      gmsh.model.setCurrent(model)
+      gmsh.model.remove()

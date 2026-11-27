@@ -594,7 +594,7 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
   faces: nodes on edges of one face), `mesh_size` and `size_<field>` per size field (at the triangles' nodes only, which
   fixes the extra view values of the old `.msh` writer), description and license on the topology variable. Between
   consecutive levels, both ways: `mesh<a>_node_in_mesh<b>_face`, `_weights` (barycentric, `basis_utils.
-  barycentric_coordinates`), `_distance` (never 0 on the sphere: the flat faces sag by up to r²/2R) and `_inside`
+  barycentric_coordinates`), `_distance` (never 0 on the sphere: the flat faces sag below the surface) and `_inside`
   (distance within the face's sag, `basis_utils.within_mesh`): the mesh-to-mesh decoder connectivity and the interpolating
   decoder's weights. gzip 4 with shuffle. `read_mesh_file(path, level)` returns the `MeshData` the model takes;
   `read_size_fields`, `read_links`, `num_levels`; `write_mesh_file(path, meshes, size_fields)`. The configs point at
@@ -647,7 +647,10 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
   or `[[levels]]`, finest first, each with its own `coarsen_boundaries` (seeds included) and `fields`;
   `make-ocean-mesh` loads the coastline once, meshes each level in a gmsh model of its own, refuses levels not finest
   first (by median edge) and writes one mesh file with the links (`--msh F.msh` gives `F_level<l>.msh`). Links also
-  store `_inside` (`basis_utils.within_mesh`: the distance to the closest face is at most its sag, r²/2R).
+  store `_inside` (`basis_utils.within_mesh`: the distance to the closest face is at most its sag, r²/2R for an acute
+  face, L²/8R for a right or obtuse one, whose circumradius is unbounded as it flattens; the review of PR #14 found a
+  node 5.4 km off a coastal sliver counted inside with r²/2R alone). With `--msh`, the gmsh files are written only
+  after the level-order check passes.
   `configs/mesh/hierarchy_50_120_300km.toml` (decided: the finest keeps the strait refinement and one connected ocean;
   the coarser levels coarsen the coastline at their size, with seeds, and may be in pieces), made locally on 27 Nov
   2026 (seamsh 0.6.0+fork, gmsh 4.15.2 macOS wheel, 41 s, 1.4 GB, 26 MB file):

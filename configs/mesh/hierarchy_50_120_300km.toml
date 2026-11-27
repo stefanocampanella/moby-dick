@@ -3,14 +3,14 @@
 
 # A hierarchy of three global ocean meshes, finest first, for hierarchical (multigrid-like) models, written to one mesh
 # file with the links between consecutive levels:
-#   moby-dick make-ocean-mesh configs/mesh/hierarchy_50_120_300km.toml /data/geometry/hierarchy_50_120_300km.nc
+#   moby-dick make-ocean-mesh configs/mesh/hierarchy_50_120_300km.toml OUTPUT.nc
 # The finest level is uniform_50km.toml: the coastline coarsened at 10 km, refined at the Turkish straits and Kerch,
 # so the ocean is one piece. The coarser levels coarsen the coastline at their own size, for good triangles at the
 # coast; narrow straits close there, so each sea to keep has a seed and is a separate piece of the mesh.
 description = """
   Hierarchy of global ocean triangular meshes, finest first: target mesh sizes uniform 50 km, 120 km and 300 km. \
-  At 50 km the mesh size and the coastline coarsening are refined at the Bosporus, the Dardanelles and the Kerch Strait \
-  (3 km and 250 m there), so that the Black Sea and the Sea of Azov are part of the ocean; \
+  At 50 km the mesh size and the coastline coarsening are refined at the Bosporus, the Dardanelles \
+  and the Kerch Strait (3 km and 250 m there), so that the Black Sea and the Sea of Azov are part of the ocean; \
   at 120 km and 300 km the coastline is coarsened at the mesh size, and enclosed seas are separate pieces. \
   All units are meters. \
   The code used the seamsh Python package by Jonathan Lambrechts \

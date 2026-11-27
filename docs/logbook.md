@@ -1898,6 +1898,25 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - the 50 km level, with its 10 km coastline and 3 km strait elements, does not;
   - seeds lost at a level were removed from it.
 
+## 2026-11-27 20:15: code reviews of #13 and #14
+
+- **#13 (mesh extra):**
+  - The mesh image's recipe ran `%post` under `sh`, without `git` (needed for seamsh's pin) and without
+    `MAMBA_ROOT_PREFIX`: now bash, the environment's binaries by path, and `git` in the environment file.
+  - The image ships the license texts of the conda packages and seamsh's.
+  - The subprocess tests import the sources (`PYTHONPATH`).
+  - ty ignores the unresolved gmsh and seamsh imports in `mobydick.meshing` and its tests.
+  - A gmsh raising `OSError` (missing native libraries) no longer breaks `--help`.
+  - seamsh 0.6.0+fork is GPL-3.0-or-later (its License-Expression), so the image's label stands.
+- **#14 (hierarchy), important:** `within_mesh` bounded the sag by the circumradius, which is unbounded for flat
+  faces, so a node 5.4 km off a coastal sliver counted as inside. Obtuse and right faces are now bounded by
+  (longest edge)²/8R, with a test. The counts on the local hierarchy are unchanged (7.26 % and 10.44 % outside): the
+  coarser levels have no such slivers.
+- **#14, also:**
+  - `--msh` files are written only after the level-order check, so a refused hierarchy leaves nothing behind;
+  - `read_links` explains a file without `_inside`;
+  - no data path in the config comment, and long lines wrapped.
+
 ## 2026-11-28 09:40: the mesh files did not open in QGIS or ParaView
 
 - **Request:** the maintainer tried the new mesh files in ParaView and QGIS; both failed.
