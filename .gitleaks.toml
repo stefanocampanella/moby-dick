@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Stefano Campanella
+# SPDX-License-Identifier: Apache-2.0
+
+# gitleaks settings: the default rules, and the false positives of the upstream history (google-deepmind/graphcast,
+# reachable from the fork's main branch, not from develop), allowed only in the commits and files where they are.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """Upstream false positives of generic-api-key: the "key" fields of WeatherNext's model configs (names \
+of the entries of a parameter tree) and the sample URL token of a local Jupyter runtime in GraphCast's Cloud VM guide."""
+condition = "AND"
+commits = [
+  "89c4b2a77a1c57b328b909c575550fd2e5aadc9c",  # DeepMind, "Add WN2 support."
+  "bf9785fa72a0f5c3eec5b516d5ea154ab07f12ab",  # DeepMind, "Adding GenCast support."
+]
+paths = [
+  '''^weathernext/weathernext2/configs/[^/]+\.json$''',
+  '''^graphcast/docs/cloud_vm_setup\.md$''',
+]

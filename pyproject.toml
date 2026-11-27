@@ -19,8 +19,8 @@ dependencies = [
     "gdal-utils == 3.13.1 ; sys_platform == 'linux'",
     "gdal[numpy] == 3.13.1 ; sys_platform == 'linux'",
     # On macOS, gdal is installed via brew and should be updated to the latest version
-    "gdal-utils == 3.13.1 ; sys_platform == 'darwin'",
-    "gdal[numpy] == 3.13.1 ; sys_platform == 'darwin'",
+    "gdal-utils == 3.13.3 ; sys_platform == 'darwin'",
+    "gdal[numpy] == 3.13.3 ; sys_platform == 'darwin'",
     "gmsh",
     "grain >= 0.2.16",
     "graphviz >= 0.21",
@@ -138,8 +138,9 @@ fail_under = 80
 [tool.ruff]
 indent-width = 2
 line-length = 120
-# The notebooks are not maintained with the code (some cells are not valid Python).
-extend-exclude = ["notebooks"]
+# The notebooks are not maintained with the code (some cells are not valid Python); bats-core and its libraries are
+# submodules of the shell tests.
+extend-exclude = ["notebooks", "tests/bats/helpers"]
 
 [tool.ruff.format]
 indent-style = "space"
@@ -148,3 +149,7 @@ quote-style = "double"
 [tool.ty.environment]
 python-version = "3.12"
 extra-paths = ["src"]
+
+[tool.ty.src]
+# Submodules of the shell tests (bats-core's documentation has Python files).
+exclude = ["tests/bats/helpers"]

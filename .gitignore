@@ -29,3 +29,7 @@ build
 .coverage
 .coverage.*
 coverage.xml
+# Local, per-machine notes for Claude Code (CLAUDE.md is the shared one)
+CLAUDE.local.md
+# uv's lock file of a local environment (the image installs with pip from pyproject.toml)
+/uv.lock

@@ -20,6 +20,11 @@ repos:
         types: [text]
         files: (\.sh|\.slurm|\.sbatch\.in|/\.env)$
         args: [--shell=bash]
+      # The bats tests: ShellCheck knows the bats syntax from the extension (settings in tests/bats/.shellcheckrc).
+      - id: shellcheck
+        name: shellcheck (bats tests)
+        types: [text]
+        files: ^tests/bats/.*\.(bats|bash)$
 
   - repo: https://github.com/fsfe/reuse-tool
     rev: v6.3.0
@@ -27,8 +32,25 @@ repos:
       # The whole repository: copyright and license of every file (SPDX headers or REUSE.toml).
       - id: reuse
 
+  # Secrets in the staged changes (`--staged`: the hook checks what a commit adds, so `pre-commit run --all-files`
+  # checks nothing). The CI job `secrets` scans the whole history. pre-commit builds gitleaks with its own Go toolchain.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
   - repo: local
     hooks:
+      # The tests of the shell scripts, with bats-core from the submodules in tests/bats/helpers. They run in the CI
+      # job `bats`.
+      - id: bats
+        name: bats
+        language: system
+        pass_filenames: false
+        files: ^(scripts/|clusters/|tests/bats/|configs/training/demo_5000\.toml$)
+        entry: >-
+          bash -c 'bats=tests/bats/helpers/bats-core/bin/bats; if [[ ! -x $bats ]]; then
+          echo "bats-core is missing: run git submodule update --init" >&2; exit 1; fi; exec "$bats" tests/bats'
       # ty from the environment, which has the dependencies to resolve imports. The NVIDIA JAX image installs jax,
       # jaxlib and flax in editable mode outside the virtual environment, which ty does not follow: add their paths
       # where they exist.

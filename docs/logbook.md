@@ -1719,3 +1719,38 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   imported only when it runs (`LAZY_COMMANDS` in `mobydick/__init__.py`; networkx and rich are loaded by other
   imports anyway, so the saving is the package itself); `longest_incident_edges` from the faces' own edges, without
   deduplication; a test keeps `graph_statistics.toml` equal to `production_run.toml` (mask, mesh, steps, radius).
+
+## 2026-11-27 17:00: work moves to a laptop; gitleaks
+
+- **Request:** JUPITER is in maintenance. Continue on a laptop (macOS arm64, 8 cores, 16 GB, no GPU, no Apptainer)
+  with a refactoring in a stack of PRs, following the notes on seamsh 0.6.0+fork:
+  1. Mesh quality targets in `graph-statistics`, without the degree-6 target.
+  2. Several seeds and per-level coastline coarsening, with warnings for basins meshed as one triangle.
+  3. A UGRID mesh file in NetCDF-4 (h5netcdf) holding every mesh, the size fields, the mesh-to-mesh connectivity and
+     the barycentric weights. No `.msh` reader: meshes are regenerated.
+  4. gmsh and seamsh in an optional `mesh` extra.
+  5. Hierarchy configs.
+  First, check what works on the laptop, and add a gitleaks check against leaking secrets.
+- **Insight:** the test suite runs on macOS arm64 (CPU) in about 3 minutes. On the environment of October (seamsh
+  `f1ab87d`), 514 tests passed and 2 failed. One failure came from an untracked local config with the old schema.
+  The other was a tolerance in `test_sharding`: one value in 384 differed by 7e-5 (relative), because jitted and
+  eager reductions run in different orders.
+- **Change:**
+  - The darwin GDAL pin follows Homebrew's GDAL (3.13.3; Linux keeps the image's 3.13.1).
+  - The prediction tolerance of `test_sharding` is now 1e-4, as for its gradients.
+  - The root `uv.lock` and `CLAUDE.local.md` (per-machine notes) are gitignored.
+  - gitleaks v8.30.1 checks secrets two ways. The pre-commit hook checks staged changes. The new CI job `secrets`
+    scans the whole history with the checksummed release binary. The lint job skips the hook.
+- **Insight:** the first full-history scan found 424 matches of `generic-api-key`, all false positives in two upstream
+  DeepMind commits reachable only from `main`: the `"key"` fields of WeatherNext's JSON configs and a sample Jupyter
+  URL token in GraphCast's Cloud VM guide. `.gitleaks.toml` allows exactly those commits and files; the scan is clean.
+- **Request:** add ShellCheck and bats-core unit tests to CI, as arco-make and arco-ocean do.
+- **Change:**
+  - bats-core and its libraries are submodules in `tests/bats/helpers`, at the commits arco-ocean uses.
+  - 35 tests cover `scripts/download.sh`, `scripts/train.sh` and the JUPITER launchers, with stand-ins for
+    Apptainer, Slurm and the module system.
+  - ShellCheck also checks the tests.
+  - CI has a `bats` job, and pre-commit a `bats` hook.
+  - ruff and ty exclude the submodules.
+- **Fix:** the tests found that `mesh_study.sh` read a case's time limit into `SECONDS`, bash's seconds counter. So
+  `06:00:00` became `06:00:0`, or one second more if a second had passed. The variable is now `SECS`.

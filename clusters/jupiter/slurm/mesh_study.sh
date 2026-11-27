@@ -34,11 +34,11 @@ sed -e "s|^APPTAINERENV_PYTHONPATH=.*|APPTAINERENV_PYTHONPATH=$PROJECT_DIR/src|"
 grep -qx "APPTAINERENV_PYTHONPATH=$PROJECT_DIR/src" "$ENV_FILE" || { echo "PYTHONPATH not set in $ENV_FILE" >&2; exit 1; }
 IFS=, read -r -a SEED_LIST <<< "$SEEDS"
 for ENTRY in "$@"; do
-    IFS=: read -r MESH MSG CHUNKS HOURS MINUTES SECONDS <<< "$ENTRY"
+    IFS=: read -r MESH MSG CHUNKS HOURS MINUTES SECS <<< "$ENTRY"
     [[ $MSG =~ ^[0-9]+$ ]] || { echo "no message passing steps in $ENTRY" >&2; exit 1; }
     CHUNKS=${CHUNKS:-0}
     TIME=03:00:00
-    [[ -n ${HOURS:-} ]] && TIME="$HOURS:$MINUTES:$SECONDS"
+    [[ -n ${HOURS:-} ]] && TIME="$HOURS:$MINUTES:$SECS"
     MESH_FILE=uniform_$MESH.msh
     [[ -f $GEOMETRY_DIR/$MESH_FILE ]] || MESH_FILE=$MESH.msh
     [[ -f $GEOMETRY_DIR/$MESH_FILE ]] || { echo "no mesh uniform_$MESH.msh or $MESH.msh in $GEOMETRY_DIR" >&2; exit 1; }
