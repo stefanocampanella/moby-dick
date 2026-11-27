@@ -160,7 +160,11 @@ def test_a_hierarchy_holds_every_level_and_the_links_between_them(tmp_path):
   for level, mesh in enumerate((fine, coarse)):
     np.testing.assert_array_equal(ugrid.read_mesh_file(path, level).mesh_graph.faces, mesh.mesh_graph.faces)
   for level, other, nodes, faces in ((0, 1, fine, coarse), (1, 0, coarse, fine)):
-    face, weights, distance = ugrid.read_links(path, level, other)
+    face, weights, distance, inside = ugrid.read_links(path, level, other)
+    # Both meshes cover the sphere: every node is within the other one, also the fine nodes off its flat faces.
+    assert inside.all()
+    if level == 0:
+      assert (distance > 1e3).any()
     vertices = nodes.mesh_graph.vertices
     assert face.shape == (len(vertices),) and weights.shape == (len(vertices), 3)
     assert face.max() < len(faces.mesh_graph.faces) and (weights >= 0).all()
@@ -170,9 +174,21 @@ def test_a_hierarchy_holds_every_level_and_the_links_between_them(tmp_path):
     closest = np.einsum("ij,ijk->ik", weights, corners)
     np.testing.assert_allclose(np.linalg.norm(closest - vertices, axis=1), distance, rtol=1e-6, atol=1e-3)
   # Coarse vertices are vertices of the fine mesh: they lie on it, at one of its faces' corners.
-  _, weights, distance = ugrid.read_links(path, 1, 0)
+  _, weights, distance, _ = ugrid.read_links(path, 1, 0)
   np.testing.assert_allclose(distance, 0.0, atol=1e-3)
   np.testing.assert_allclose(weights.max(axis=1), 1.0, atol=1e-6)
+
+
+def test_nodes_outside_the_other_mesh_are_flagged(tmp_path):
+  """Nodes of a closed mesh north of an open mesh's edge (60° N) are outside the open mesh: flagged so, with the
+  distance to its nearest face, while the nodes well inside it are within it."""
+  closed, open_mesh = icosahedral_mesh.get_multi_mesh_data(3), _ocean_like(2)
+  path = tmp_path / "pair.nc"
+  ugrid.write_mesh_file(path, [closed, open_mesh])
+  _, _, distance, inside = ugrid.read_links(path, 0, 1)
+  lat, _ = cartesian_to_lat_lon(closed.mesh_graph.vertices)
+  assert not inside[lat > 75.0].any() and distance[lat > 75.0].min() > 500e3
+  assert inside[lat < 45.0].all()
 
 
 def test_only_earth_centred_metres_are_written(tmp_path):

@@ -1877,6 +1877,27 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - A core-only environment on the laptop passes the tests, with the three mesh modules skipped.
   - The images were not built: there is no Apptainer on the laptop.
 
+## 2026-11-27 20:05: one config for a mesh hierarchy
+
+- **Request:**
+  - One configuration file makes a whole hierarchy, instead of separate meshes combined afterwards.
+  - The finest mesh keeps the strait refinement (one connected ocean). The coarser ones coarsen the coastline at
+    their own size and may be in pieces.
+  - First hierarchy: 50, 120 and 300 km.
+- **Change:**
+  - `MeshGenerationConfig` takes one mesh, or `[[levels]]` finest first, each with its own coarsening, seeds and size
+    fields.
+  - `make-ocean-mesh` loads the coastline once, meshes each level, refuses levels not finest first, and writes one
+    file with the links. `--msh` writes one gmsh file per level.
+  - New config `configs/mesh/hierarchy_50_120_300km.toml`.
+  - Links gain `_inside` (`basis_utils.within_mesh`). The docstring of #12 said the distance is 0 inside, but on the
+    sphere the flat faces sag below the surface by up to r²/2R, so it never is.
+- **Experiment:** made the hierarchy and the 120 km uniform mesh locally. Quality per level, pieces, lost seas, and
+  nodes outside the coarser levels are in CLAUDE.md ("Hierarchies in one config"). In short:
+  - the coarse levels meet the targets;
+  - the 50 km level, with its 10 km coastline and 3 km strait elements, does not;
+  - seeds lost at a level were removed from it.
+
 ## 2026-11-28 09:40: the mesh files did not open in QGIS or ParaView
 
 - **Request:** the maintainer tried the new mesh files in ParaView and QGIS; both failed.

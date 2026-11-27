@@ -1,0 +1,113 @@
+# SPDX-FileCopyrightText: 2026 Stefano Campanella
+# SPDX-License-Identifier: Apache-2.0
+
+# A hierarchy of three global ocean meshes, finest first, for hierarchical (multigrid-like) models, written to one mesh
+# file with the links between consecutive levels:
+#   moby-dick make-ocean-mesh configs/mesh/hierarchy_50_120_300km.toml /data/geometry/hierarchy_50_120_300km.nc
+# The finest level is uniform_50km.toml: the coastline coarsened at 10 km, refined at the Turkish straits and Kerch,
+# so the ocean is one piece. The coarser levels coarsen the coastline at their own size, for good triangles at the
+# coast; narrow straits close there, so each sea to keep has a seed and is a separate piece of the mesh.
+description = """
+  Hierarchy of global ocean triangular meshes, finest first: target mesh sizes uniform 50 km, 120 km and 300 km. \
+  At 50 km the mesh size and the coastline coarsening are refined at the Bosporus, the Dardanelles and the Kerch Strait \
+  (3 km and 250 m there), so that the Black Sea and the Sea of Azov are part of the ocean; \
+  at 120 km and 300 km the coastline is coarsened at the mesh size, and enclosed seas are separate pieces. \
+  All units are meters. \
+  The code used the seamsh Python package by Jonathan Lambrechts \
+  and a description of the algorithm can be found at \
+  https://doi.org/10.1007/s10236-008-0148-3 \
+  The code uses coastline shapefiles, which are taken from \
+  NaturalEarth physical vector 1:10m coastline files \
+  (version 4.1.0, accessed on 21/01/2026).
+  """
+license = """
+  The mesh is licensed under the Creative Commons \
+  Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0). You \
+  may obtain a copy of the License at: \
+  https://creativecommons.org/licenses/by-nc-sa/4.0/. \
+  Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com
+  """
+
+[mesh]
+smoothness = 0.3
+
+[domain]
+filepath = "/data/geometry/ne_10m_coastline/ne_10m_coastline.shp"
+physical_name_field = "featurecla"
+curve_type = "bspline"
+
+# Level 0, 50 km: as uniform_50km.toml.
+[[levels]]
+name = "50km"
+
+[[levels.coarsen_boundaries.fields]]
+name = "uniform"
+value = 10_000.0
+
+[[levels.coarsen_boundaries.fields]]
+name = "point_refinement"
+points = [[41.12, 29.07], [40.20, 26.40], [45.30, 36.55]]  # Bosporus, Dardanelles, Kerch Strait (latitude, longitude)
+size = 250.0
+growth = 0.02
+
+[[levels.fields]]
+name = "uniform"
+value = 50_000.0
+
+[[levels.fields]]
+name = "point_refinement"
+points = [[41.12, 29.07], [40.20, 26.40], [45.30, 36.55]]  # Bosporus, Dardanelles, Kerch Strait (latitude, longitude)
+size = 3_000.0
+growth = 0.3
+
+# Level 1, 120 km: the coastline coarsened at the mesh size; seeds (latitude, longitude) keep the seas.
+[[levels]]
+name = "120km"
+
+[levels.coarsen_boundaries]
+x0_projection = "equirectangular"
+x0 = [
+  [90.0, 0.0],    # North Pole (the ocean)
+  [35.0, -40.0],  # North Atlantic (the ocean, when the Arctic's passages close)
+  [35.0, 18.0],   # Mediterranean Sea (Ionian Sea)
+  [43.5, 34.0],   # Black Sea
+  [46.0, 36.5],   # Sea of Azov (5 triangles at 120 km)
+  [58.0, 20.0],   # Baltic Sea
+  [20.0, 38.5],   # Red Sea
+  [27.0, 51.0],   # Persian Gulf
+  [60.0, -85.0],  # Hudson Bay
+]
+# Lost at 120 km, so not seeded (27 Nov 2026, seamsh 0.6.0+fork): the White Sea (65.8, 37.5). The Gulf of California
+# stays part of the ocean.
+
+[[levels.coarsen_boundaries.fields]]
+name = "uniform"
+value = 120_000.0
+
+[[levels.fields]]
+name = "uniform"
+value = 120_000.0
+
+# Level 2, 300 km: the same, at 300 km.
+[[levels]]
+name = "300km"
+
+[levels.coarsen_boundaries]
+x0_projection = "equirectangular"
+x0 = [
+  [90.0, 0.0],    # North Pole (the ocean)
+  [35.0, -40.0],  # North Atlantic (the ocean, when the Arctic's passages close)
+  [35.0, 18.0],   # Mediterranean Sea (Ionian Sea)
+  [60.0, -85.0],  # Hudson Bay
+]
+# Lost at 300 km, so not seeded (27 Nov 2026, seamsh 0.6.0+fork): the Black Sea (43.5, 34.0), Sea of Azov (46.0, 36.5),
+# Baltic Sea (58.0, 20.0), Red Sea (20.0, 38.5), Persian Gulf (27.0, 51.0), Gulf of California (27.0, -111.0) and White
+# Sea (65.8, 37.5). Their nodes of the 120 km level are outside this mesh (`_inside` = 0 in the links).
+
+[[levels.coarsen_boundaries.fields]]
+name = "uniform"
+value = 300_000.0
+
+[[levels.fields]]
+name = "uniform"
+value = 300_000.0

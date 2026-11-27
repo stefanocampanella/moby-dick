@@ -232,15 +232,10 @@ class CoarsenBoundariesConfig(ApplicationConfig):
     return list(self.x0)
 
 
-class MeshGenerationConfig(ApplicationConfig):
-  """Settings of moby-dick make-ocean-mesh: the target mesh size is the minimum of the fields."""
+class LevelConfig(ApplicationConfig):
+  """One mesh of a hierarchy: its coastline coarsening (with its own seeds) and its size fields."""
 
-  description: str = ""
-  license: str = ""
-  model_name: str = Field(default="OceanMesh", description="Name of the gmsh model (in the .msh file of --msh)")
-  gmsh: GmshConfig = Field(default_factory=GmshConfig)
-  mesh: MesherConfig = Field(default_factory=MesherConfig)
-  domain: DomainConfig
+  name: str = Field(default="", description="A label for the logs, e.g. 120km")
   coarsen_boundaries: CoarsenBoundariesConfig
   fields: list[FieldConfig] = Field(min_length=1)
 
@@ -248,6 +243,46 @@ class MeshGenerationConfig(ApplicationConfig):
   def check_field_names(self) -> Self:
     _check_unique_field_types(self.fields, "mesh")
     return self
+
+
+class MeshGenerationConfig(ApplicationConfig):
+  """Settings of moby-dick make-ocean-mesh: one mesh (`coarsen_boundaries` and `fields`) or a hierarchy (`levels`,
+  finest first, each with its own coarsening and fields), meshed from one coastline and written to one mesh file. The
+  target mesh size of a mesh is the minimum of its fields."""
+
+  description: str = ""
+  license: str = ""
+  model_name: str = Field(default="OceanMesh", description="Name of the gmsh model (in the .msh file of --msh)")
+  gmsh: GmshConfig = Field(default_factory=GmshConfig)
+  mesh: MesherConfig = Field(default_factory=MesherConfig)
+  domain: DomainConfig
+  coarsen_boundaries: CoarsenBoundariesConfig | None = Field(default=None, description="One mesh: its coarsening")
+  fields: list[FieldConfig] | None = Field(default=None, min_length=1, description="One mesh: its size fields")
+  levels: list[LevelConfig] | None = Field(
+    default=None,
+    min_length=2,
+    description="A hierarchy, finest first. Typically the finest keeps narrow straits open with point refinement "
+    "(one connected ocean) and the coarser ones coarsen the coastline at their own size, with a seed in each sea to "
+    "keep (separate pieces)",
+  )
+
+  @model_validator(mode="after")
+  def check_one_form(self) -> Self:
+    single = self.coarsen_boundaries is not None or self.fields is not None
+    if single == (self.levels is not None):
+      raise ValueError("give either coarsen_boundaries and fields (one mesh) or levels (a hierarchy), not both")
+    if single and (self.coarsen_boundaries is None or self.fields is None):
+      raise ValueError("one mesh needs both coarsen_boundaries and fields")
+    if self.fields is not None:
+      _check_unique_field_types(self.fields, "mesh")
+    return self
+
+  def mesh_levels(self) -> list[LevelConfig]:
+    """The meshes to make, finest first: the levels of a hierarchy, or the one mesh."""
+    if self.levels is not None:
+      return list(self.levels)
+    assert self.coarsen_boundaries is not None and self.fields is not None
+    return [LevelConfig(coarsen_boundaries=self.coarsen_boundaries, fields=self.fields)]
 
 
 class IcosahedralMeshConfig(ApplicationConfig):

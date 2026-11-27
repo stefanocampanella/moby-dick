@@ -594,7 +594,8 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
   faces: nodes on edges of one face), `mesh_size` and `size_<field>` per size field (at the triangles' nodes only, which
   fixes the extra view values of the old `.msh` writer), description and license on the topology variable. Between
   consecutive levels, both ways: `mesh<a>_node_in_mesh<b>_face`, `_weights` (barycentric, `basis_utils.
-  barycentric_coordinates`) and `_distance` (0 inside): the mesh-to-mesh decoder connectivity and the interpolating
+  barycentric_coordinates`), `_distance` (never 0 on the sphere: the flat faces sag by up to r²/2R) and `_inside`
+  (distance within the face's sag, `basis_utils.within_mesh`): the mesh-to-mesh decoder connectivity and the interpolating
   decoder's weights. gzip 4 with shuffle. `read_mesh_file(path, level)` returns the `MeshData` the model takes;
   `read_size_fields`, `read_links`, `num_levels`; `write_mesh_file(path, meshes, size_fields)`. The configs point at
   `uniform_*km.nc`: regenerate the meshes (`make-ocean-mesh`) before training with this code.
@@ -642,6 +643,26 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
   component of at most `[mesh] small_component_max_faces` (3; 0: no check) triangles (a sea smaller than the mesh
   size is one triangle). seamsh's progress bars show only on a terminal. Tests on the synthetic channel coastline:
   `tests/test_mesh_config.py`.
+- **Hierarchies in one config** (27 Nov 2026): `MeshGenerationConfig` takes one mesh (`coarsen_boundaries`, `fields`)
+  or `[[levels]]`, finest first, each with its own `coarsen_boundaries` (seeds included) and `fields`;
+  `make-ocean-mesh` loads the coastline once, meshes each level in a gmsh model of its own, refuses levels not finest
+  first (by median edge) and writes one mesh file with the links (`--msh F.msh` gives `F_level<l>.msh`). Links also
+  store `_inside` (`basis_utils.within_mesh`: the distance to the closest face is at most its sag, r²/2R).
+  `configs/mesh/hierarchy_50_120_300km.toml` (decided: the finest keeps the strait refinement and one connected ocean;
+  the coarser levels coarsen the coastline at their size, with seeds, and may be in pieces), made locally on 27 Nov
+  2026 (seamsh 0.6.0+fork, gmsh 4.15.2 macOS wheel, 41 s, 1.4 GB, 26 MB file):
+  - 50 km: 181,970 nodes, one piece; targets failed at the coast (worst gamma 0.01, smallest angle 3.7°, 0.39 % below
+    0.8; 79 % of the poor faces touch the coast): the 10 km coastline and the 3 km strait elements.
+  - 120 km: 30,916 nodes, 8 pieces (ocean, Mediterranean 218 triangles, Hudson Bay 119, Red Sea 70, Black Sea 66,
+    Baltic 25, Persian Gulf 25, Azov 5); targets met (worst gamma 0.42, smallest angle 21.3°, 0.19 % below 0.8). The
+    White Sea is lost; the Gulf of California stays in the ocean.
+  - 300 km: 5,001 nodes, 3 pieces (ocean, Mediterranean, Hudson Bay); targets met (0.68, 33.7°, 0.46 %). Lost: Black
+    Sea, Azov, Baltic, Red Sea, Persian Gulf, Gulf of California, White Sea (not seeded: lost seeds only warn).
+  - Nodes outside the next coarser mesh: 7.3 % of the 50 km nodes (coasts, lost seas), 10.4 % of the 120 km ones.
+  - The 120 km mesh of `uniform_120km.toml` (10 km coastline) fails the targets: worst gamma 0.04, 1.24 % below 0.8,
+    smallest angle 7.3°, 87 % of the poor faces at the coast.
+  - All seeds checked at sea against the GLORYS static depth (`data/dataset/glorys12_static_res-0p25_levels-10.zip`).
+    seamsh's lost-seed warnings print the seed as (longitude, latitude), the order it receives.
 - **Descriptions** of all `configs/mesh/*.toml` match their fields (checked on 30 Oct 2026). The `lambrechts*`
   configs take the smaller of a shore-proximity and a bathymetry field; they said "uniform 300 km" before.
   `domain.sampling` in them is ignored (the shore-proximity field has its own).

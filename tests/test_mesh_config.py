@@ -51,7 +51,10 @@ def test_defaults():
   assert configs.mesh.smoothness == 0.3 and configs.mesh.optimize and configs.mesh.small_component_max_faces == 3
   assert configs.model_name == "OceanMesh"
   assert configs.domain.physical_name_field == "featurecla" and configs.domain.curve_type == "bspline"
-  assert configs.coarsen_boundaries.x0 == [(0.0, 0.0)] and configs.coarsen_boundaries.x0_projection == "stereographic"
+  assert (
+    configs.mesh_levels()[0].coarsen_boundaries.x0 == [(0.0, 0.0)]
+    and configs.mesh_levels()[0].coarsen_boundaries.x0_projection == "stereographic"
+  )
 
 
 @pytest.mark.parametrize(
@@ -64,7 +67,7 @@ def test_seeds_are_one_point_or_a_list(x0, expected):
   list of points."""
   coarsening = {"fields": [UNIFORM_COARSENING], "x0": x0, "x0_projection": "equirectangular"}
   configs = MeshGenerationConfig.model_validate(_settings(coarsen_boundaries=coarsening))
-  assert configs.coarsen_boundaries.x0 == expected
+  assert configs.mesh_levels()[0].coarsen_boundaries.x0 == expected
 
 
 @pytest.mark.parametrize(
@@ -92,8 +95,8 @@ def test_equirectangular_seeds_are_latitude_then_longitude():
   order of the equirectangular CRS (longitude, latitude); stereographic seeds are passed as given."""
   coarsening = {"fields": [UNIFORM_COARSENING], "x0": [[90.0, 0.0], [43.5, 34.0]], "x0_projection": "equirectangular"}
   configs = MeshGenerationConfig.model_validate(_settings(coarsen_boundaries=coarsening))
-  assert configs.coarsen_boundaries.seeds() == [(0.0, 90.0), (34.0, 43.5)]
-  stereographic = MeshGenerationConfig.model_validate(MINIMAL).coarsen_boundaries
+  assert configs.mesh_levels()[0].coarsen_boundaries.seeds() == [(0.0, 90.0), (34.0, 43.5)]
+  stereographic = MeshGenerationConfig.model_validate(MINIMAL).mesh_levels()[0].coarsen_boundaries
   assert stereographic.seeds() == [(0.0, 0.0)]
 
 
@@ -101,22 +104,28 @@ def test_equirectangular_seeds_are_latitude_then_longitude():
   "path", sorted(set(MESH_CONFIGS.glob("*.toml")) - set(MESH_CONFIGS.glob("icosahedral_*.toml"))), ids=lambda p: p.name
 )
 def test_shipped_configs_are_valid(path):
-  """Every shipped ocean mesh config validates, and a uniform config's name and description give its value in km."""
+  """Every shipped ocean mesh config validates, a uniform config's name and description give its value in km, the
+  finest mesh keeps the Black Sea, and the coarser levels of a hierarchy coarsen the coastline at their size."""
   configs = cli_utils.read_configs(path, schema=MeshGenerationConfig)
   if path.name.startswith("uniform_") and path.stem.endswith("km"):
-    (field,) = [field for field in configs.fields if field.name == "uniform"]
+    (field,) = [field for field in configs.mesh_levels()[0].fields if field.name == "uniform"]
     km = int(path.stem.removeprefix("uniform_").removesuffix("km"))
     assert field.value == km * 1000
     assert f"value of {km} km" in " ".join(configs.description.split())
   # Every ocean mesh keeps the Black Sea: coarsening and mesh size refined at the Turkish straits and Kerch.
-  for fields in (configs.coarsen_boundaries.fields, configs.fields):
+  for fields in (configs.mesh_levels()[0].coarsen_boundaries.fields, configs.mesh_levels()[0].fields):
     (refinement,) = [field for field in fields if field.name == "point_refinement"]
     assert len(refinement.points) == 3
-  (coarsening,) = [field for field in configs.coarsen_boundaries.fields if field.name == "uniform"]
+  (coarsening,) = [field for field in configs.mesh_levels()[0].coarsen_boundaries.fields if field.name == "uniform"]
   assert coarsening.value == 10_000.0
   # Paths are container paths, used as they are.
   assert configs.domain.filepath.startswith("/data/")
   assert "Black Sea" in configs.description
+  # The coarser levels of a hierarchy coarsen the coastline at their own size, with seeds for the seas to keep.
+  for level in configs.mesh_levels()[1:]:
+    (size,) = [field.value for field in level.fields if field.name == "uniform"]
+    (coarsening,) = [field.value for field in level.coarsen_boundaries.fields if field.name == "uniform"]
+    assert coarsening == size and len(level.coarsen_boundaries.x0) > 1, level.name
 
 
 @pytest.mark.parametrize("path", sorted(MESH_CONFIGS.glob("icosahedral_*.toml")), ids=lambda path: path.name)
@@ -194,3 +203,21 @@ def test_field_arguments():
   arguments = field_arguments(field)
   assert "name" not in arguments
   assert arguments["filepath"] == "/data/geometry/coast.shp"
+
+
+def test_one_mesh_or_a_hierarchy():
+  """A config describes one mesh (coarsen_boundaries and fields) or a hierarchy (levels, at least two), not both and
+  not neither; mesh_levels() gives the meshes to make in either form."""
+  level = {"coarsen_boundaries": {"fields": [UNIFORM_COARSENING]}, "fields": [{"name": "uniform", "value": 1e6}]}
+  hierarchy = {"domain": {"filepath": "coast.shp"}, "levels": [{**level, "name": "fine"}, level]}
+  configs = MeshGenerationConfig.model_validate(hierarchy)
+  assert [level.name for level in configs.mesh_levels()] == ["fine", ""]
+  assert len(MeshGenerationConfig.model_validate(MINIMAL).mesh_levels()) == 1
+  for settings, message in (
+    ({**MINIMAL, "levels": hierarchy["levels"]}, "not both"),
+    ({"domain": {"filepath": "coast.shp"}}, "either"),
+    ({**hierarchy, "levels": [level]}, "at least 2"),
+    ({"domain": {"filepath": "coast.shp"}, "fields": MINIMAL["fields"]}, "both coarsen_boundaries and fields"),
+  ):
+    with pytest.raises(ValidationError, match=message):
+      MeshGenerationConfig.model_validate(settings)

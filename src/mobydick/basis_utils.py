@@ -57,6 +57,28 @@ def barycentric_coordinates(mesh: Mesh, points: np.ndarray) -> tuple[np.ndarray,
   return np.asarray(face_indices), weights, np.asarray(distances)
 
 
+def within_mesh(mesh: Mesh, face_indices: np.ndarray, points: np.ndarray, distances: np.ndarray) -> np.ndarray:
+  """Whether each point on the Earth's surface lies within the mesh: its distance to the closest face (`face_indices`,
+  `distances`, from `barycentric_coordinates`) is at most the face's sag, the depth of its circumcentre below the
+  sphere through its vertices, r² / 2R (r the circumradius), with 10 % for the ellipsoid, plus a metre. A point is
+  never on the flat faces (they pass below the surface by up to the sag: 0.3 km at 120 km), so the distance alone is
+  not 0 inside; a point outside the mesh is farther, except within about the sag of its boundary.
+
+  Args:
+    mesh: Triangular mesh in Earth-centred coordinates (metres).
+    face_indices: The closest face of each point [num_points].
+    points: Points [num_points, 3].
+    distances: Distances to those faces [num_points] (metres).
+  """
+  a, b, c = (mesh.vertices[mesh.faces[face_indices, i]] for i in range(3))
+  lengths = np.stack([np.linalg.norm(b - c, axis=1), np.linalg.norm(c - a, axis=1), np.linalg.norm(a - b, axis=1)], 1)
+  area = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+  with np.errstate(divide="ignore", invalid="ignore"):
+    circumradius = np.where(area > 0, lengths.prod(axis=1) / (4 * area), lengths.max(axis=1) / 2)
+  sag = circumradius**2 / (2 * np.linalg.norm(points, axis=1))
+  return distances <= 1.1 * sag + 1.0
+
+
 def compute_basis(mesh: Mesh, points: np.ndarray, dtype: type[np.floating] = np.float32) -> sparse.csr_matrix:
   """Values of the mesh's linear basis functions at arbitrary points: grid points (mesh to grid) or the vertices of
   another mesh (mesh to mesh).
