@@ -1849,3 +1849,21 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - `--msh` keeps the license and description.
   - Points closest to a degenerate face get weight 1 on its nearest vertex instead of NaN.
   - Stale CLAUDE.md bullets are updated.
+
+## 2026-11-28 09:40: the mesh files did not open in QGIS or ParaView
+
+- **Request:** the maintainer tried the new mesh files in ParaView and QGIS; both failed.
+- **Cause:** every attribute was NC_STRING (h5netcdf's default for `str`), and both readers take text attributes with
+  `nc_get_att_text`: ParaView said "File does not contain a mesh", QGIS fell back to GDAL and showed the face table
+  as a raster. The compatibility had been claimed, not tried.
+- **Found by opening the files** in QGIS 3.44.7 (its Python, a throwaway profile) and ParaView 6.0.1 (`pvpython --dr`),
+  removing variables until they opened:
+  - text attributes as NC_CHAR (fixed-length UTF-8); description and license one text each;
+  - MDAL reads node fields of int32 or floating point only: `boundary` is int32 (int8 before);
+  - QGIS crashes (SIGBUS) on a node field with one non-zero value everywhere, e.g. a uniform size field: such fields
+    are scalars, broadcast when read;
+  - `node_x/y/z` became `node_cartesian_x/y/z`: MDAL takes `<mesh>_node_z` for the elevation;
+  - the link weights [nodes, 3] are no node field any more (viewers read them as a time series).
+- **Result:** QGIS opens every level of the hierarchy with its fields; ParaView opens files of one mesh, not
+  hierarchies (its reader takes the first mesh and reads the node fields of every level as the first's).
+- Mesh files of 27 Nov must be regenerated.

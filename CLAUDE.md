@@ -584,10 +584,10 @@ GPUs busy at 50 levels and 8 x 2 runs out of host memory; the `.env` default is 
 
 **Meshes**: `geospatial_mesh.py` (seamsh, coastline shapefiles) generates mesh files from `configs/mesh/*.toml`;
 generated meshes and geometry live in `data/geometry` (gitignored, bound as `/data/geometry`).
-- **Mesh files** (since 27 Nov 2026, `mobydick/ugrid.py`; decided: NetCDF-4 with h5netcdf, so QGIS, ParaView, xugrid
-  and uxarray can open them; no `.msh` reader any more, meshes are regenerated rather than converted): one mesh or a
+- **Mesh files** (since 27 Nov 2026, `mobydick/ugrid.py`; decided: NetCDF-4 with h5netcdf, so that UGRID tools
+  such as QGIS and ParaView open them; no `.msh` reader any more, meshes are regenerated rather than converted): one mesh or a
   hierarchy, finest first, each a UGRID topology `mesh<l>` with prefixed dimensions and variables: node lon/lat
-  (WGS84, the UGRID node coordinates), node x/y/z (Earth-centred metres, read back bit for bit, CRS in
+  (WGS84, the UGRID node coordinates), `node_cartesian_x/y/z` (Earth-centred metres, read back bit for bit, CRS in
   `mesh<l>_crs:crs_wkt`), `face_nodes`, the processor's directed `edge_nodes` (sender first), `boundary` (from the
   faces: nodes on edges of one face), `mesh_size` and `size_<field>` per size field (at the triangles' nodes only, which
   fixes the extra view values of the old `.msh` writer), description and license on the topology variable. Between
@@ -596,6 +596,15 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
   decoder's weights. gzip 4 with shuffle. `read_mesh_file(path, level)` returns the `MeshData` the model takes;
   `read_size_fields`, `read_links`, `num_levels`; `write_mesh_file(path, meshes, size_fields)`. The configs point at
   `uniform_*km.nc`: regenerate the meshes (`make-ocean-mesh`) before training with this code.
+  - **Viewers** (checked on 28 Nov 2026 with QGIS 3.44.7 and ParaView 6.0.1 on macOS; the first files, of 27 Nov,
+    opened in neither): QGIS lists every level as a mesh layer with its node fields (`Ugrid:"F.nc":mesh1`); ParaView's
+    UGRID reader reads files of one mesh only (with several it reads the other levels' node fields as fields of the
+    first and fails). What they need, all in `tests/test_ugrid.py`: text attributes NC_CHAR (h5netcdf writes `str` as
+    NC_STRING, and both read attributes with `nc_get_att_text`, so they found no `cf_role`); node fields int32 or
+    floating point (MDAL reads no int8 or int16); a node field with one value everywhere stored as a scalar (QGIS
+    crashes, SIGBUS, on a constant non-zero node field, e.g. every uniform size field; the readers broadcast it); no
+    `<mesh>_node_z` (MDAL's fallback name for the elevation); the [nodes, 3] link weights without `location` (else
+    read as 3 values at as many times as nodes). Description and license are one text each (NC_CHAR holds no list).
 - **Settings:** validated by `mesh_config.MeshGenerationConfig` (pydantic, unknown keys rejected). It holds the gmsh
   options, smoothness, domain shapefile, boundary coarsening, and a list of size fields discriminated by `name`
   (`uniform`, `shore_proximity`, `bathymetry`, `bathymetry_hessian`), each type at most once. The target size is the

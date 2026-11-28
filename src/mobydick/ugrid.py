@@ -16,23 +16,29 @@
 xarray (h5netcdf), without gmsh.
 
 UGRID (https://ugrid-conventions.github.io/ugrid-conventions/) describes unstructured meshes with variable
-attributes, so the files open in tools that read it (xugrid, uxarray, QGIS, ParaView). One file holds one mesh or a
-hierarchy, finest first, each mesh a topology of its own named `mesh<level>`, with dimensions and variables prefixed
-by that name:
+attributes, so the files open in tools that read it. Checked on 28 Nov 2026: QGIS 3.44 (MDAL) lists every level as a
+layer with its node fields; ParaView 6.0 (vtkNetCDFUGRIDReader) reads files of one mesh only (with several, it reads
+the node fields of the other levels as fields of the first, and fails). One file holds one mesh or a hierarchy,
+finest first, each mesh a topology of its own named `mesh<level>`, with dimensions and variables prefixed by that
+name:
 
-- `mesh<l>`: the topology variable (`cf_role = "mesh_topology"`), with the mesh's `description` and `license` (lists
-  of strings, as `MeshData` has them);
+- `mesh<l>`: the topology variable (`cf_role = "mesh_topology"`), with the mesh's `description` and `license` (one
+  text each, the strings of `MeshData`'s lists joined by line breaks);
 - `mesh<l>_node_lon`, `mesh<l>_node_lat`: geodetic longitude and latitude of the nodes on WGS84 (degrees), the
   UGRID node coordinates for other tools;
-- `mesh<l>_node_x`, `_y`, `_z`: the node coordinates the model uses, Earth-centred metres in the system of
-  `mesh<l>_crs` (its `crs_wkt`), read back as written;
+- `mesh<l>_node_cartesian_x`, `_y`, `_z`: the node coordinates the model uses, Earth-centred metres in the system
+  of `mesh<l>_crs` (its `crs_wkt`), read back as written (not `mesh<l>_node_z`, which QGIS takes for the elevation);
 - `mesh<l>_face_nodes` [faces, 3] and `mesh<l>_edge_nodes` [edges, 2] (start index 0): the triangles and their
   edges, each once (UGRID's face and edge connectivity, which other tools read);
 - `mesh<l>_processor_edges` [processor edges, 2]: the processor's directed edges, sender first (both directions of
   every face edge, or the multi-mesh's edges of all levels), outside the UGRID topology;
-- `mesh<l>_boundary`: 1 at the nodes of the boundary (the coastline), when the mesh has one;
+- `mesh<l>_boundary`: 1 at the nodes of the boundary (the coastline), when the mesh has one (int32, as QGIS reads
+  no smaller integers);
 - `mesh<l>_mesh_size` and `mesh<l>_size_<field>`: the target mesh size (the minimum of the fields) and each size
   field at the nodes (metres).
+
+Text attributes are NC_CHAR (see `_char`). A node field with the same value at every node (e.g. a uniform size
+field) is stored as a scalar and read back at every node: QGIS 3.44 crashes on such fields.
 
 Between two consecutive levels a (finer) and b (coarser), both ways: `mesh<a>_node_in_mesh<b>_face` (the face of
 mesh b closest to each node of mesh a: containing it, or nearest for a node outside mesh b),
@@ -47,6 +53,7 @@ import pathlib
 from collections.abc import Mapping, Sequence
 
 import click
+import h5py
 import numpy as np
 import pyproj
 import xarray as xr
@@ -60,6 +67,35 @@ logger = logging.getLogger(__name__)
 
 # Lossless compression of every array (HDF5 gzip with byte shuffling): 8 to 14 times smaller than text .msh files.
 _ENCODING = {"compression": "gzip", "compression_opts": 4, "shuffle": True}
+
+
+def _char(value: object) -> object:
+  """A text attribute as netCDF's NC_CHAR (fixed-length UTF-8), other values as they are.
+
+  h5netcdf writes `str` attributes as variable-length strings, which netCDF-C reads as NC_STRING. UGRID readers
+  (QGIS's MDAL, ParaView's vtkNetCDFUGRIDReader) read text attributes with `nc_get_att_text`, which accepts NC_CHAR
+  only: with NC_STRING they find no `cf_role`, hence no mesh. xarray reads both back as `str`.
+  """
+  if not isinstance(value, str):
+    return value
+  encoded = value.encode()
+  return np.array(encoded, dtype=h5py.string_dtype("utf-8", max(len(encoded), 1)))
+
+
+def _constant_as_scalar(variable: xr.Variable) -> xr.Variable:
+  """A node field (a variable with a `location`) with one value at every node as a scalar, other variables as they
+  are (see the module docstring)."""
+  values = variable.values
+  if variable.attrs.get("location") != "node" or values.size < 2 or not (values == values.flat[0]).all():
+    return variable
+  attributes = {key: value for key, value in variable.attrs.items() if key not in ("location", "mesh")}
+  return xr.Variable((), values.flat[0], {**attributes, "comment": f"The value at every node of {variable.dims[0]}"})
+
+
+def _node_values(dataset: xr.Dataset, name: str, nodes: str) -> np.ndarray:
+  """A node field at each node of dimension `nodes` (stored as a scalar when constant)."""
+  variable = dataset[name]
+  return np.full(dataset.sizes[nodes], variable.values) if variable.ndim == 0 else variable.values
 
 
 def level_name(level: int) -> str:
@@ -94,8 +130,10 @@ def mesh_dataset(mesh: MeshData, level: int = 0, size_fields: Mapping[str, np.nd
   face_edges = np.sort(np.stack([faces.reshape(-1), np.roll(faces, -1, axis=1).reshape(-1)], axis=1), axis=1)
   edges = np.unique(face_edges, axis=0).astype(np.int32) if len(face_edges) else np.empty((0, 2), np.int32)
   nodes, face_dim, edge_dim = f"{name}_nNodes", f"{name}_nFaces", f"{name}_nEdges"
-  # Lists of strings; an empty one is left out (netCDF would store it as an empty number array).
-  texts = {key: list(value) for key, value in (("description", mesh.description), ("license", mesh.license)) if value}
+  # One text each (NC_CHAR holds no list of strings); an empty one is left out.
+  texts = {
+    key: "\n".join(value) for key, value in (("description", mesh.description), ("license", mesh.license)) if value
+  }
   lat, lon = cartesian_to_lat_lon(vertices) if len(vertices) else (np.empty(0), np.empty(0))
   crs = f"{name}_crs"
   variables: dict[str, xr.Variable] = {
@@ -138,7 +176,7 @@ def mesh_dataset(mesh: MeshData, level: int = 0, size_fields: Mapping[str, np.nd
     ),
   }
   for axis, column in zip("xyz", vertices.T, strict=True):
-    variables[f"{name}_node_{axis}"] = xr.Variable(
+    variables[f"{name}_node_cartesian_{axis}"] = xr.Variable(
       nodes,
       column,
       {"units": "m", "grid_mapping": crs, "long_name": f"Earth-centred {axis} of the nodes", "mesh": name},
@@ -147,11 +185,12 @@ def mesh_dataset(mesh: MeshData, level: int = 0, size_fields: Mapping[str, np.nd
   if graph.boundary is not None:
     variables[f"{name}_boundary"] = xr.Variable(
       nodes,
-      np.asarray(graph.boundary, dtype=np.int8),
+      np.asarray(graph.boundary, dtype=np.int32),
       {
         "location": "node",
         "mesh": name,
-        "flag_values": np.array([0, 1], dtype=np.int8),
+        "flag_values": np.array([0, 1], dtype=np.int32),
+        "flag_meanings": "interior boundary",
         "long_name": "Node of the boundary",
       },
     )
@@ -182,10 +221,11 @@ def links_dataset(fine: MeshGraph, coarse: MeshGraph, fine_level: int) -> xr.Dat
       face.astype(np.int32),
       {**attributes, "long_name": f"Face of {level_name(b)} closest to each node (start index 0)"},
     )
+    # Not a data variable of the mesh: UGRID viewers would read [nodes, 3] as 3 values at each of `nodes` times.
     variables[f"{name}_weights"] = xr.Variable(
       (nodes, "Three"),
       weights,
-      {**attributes, "long_name": f"Barycentric coordinates of the closest point, of the nodes of {name}_face"},
+      {"long_name": f"Barycentric coordinates of the closest point, of the nodes of {name}_face"},
     )
     variables[f"{name}_distance"] = xr.Variable(
       nodes, distance, {**attributes, "units": "m", "long_name": f"Distance to {level_name(b)} (0: inside)"}
@@ -214,12 +254,16 @@ def write_mesh_file(
   for level in range(len(meshes) - 1):
     parts.append(links_dataset(meshes[level].mesh_graph, meshes[level + 1].mesh_graph, level))
   # Every variable has its own name (prefixed by its level): no merging needed, and attributes are kept.
-  dataset = xr.Dataset({name: variable for part in parts for name, variable in part.variables.items()})
+  dataset = xr.Dataset(
+    {name: _constant_as_scalar(variable) for part in parts for name, variable in part.variables.items()}
+  )
   dataset.attrs = {
     "Conventions": "CF-1.11 UGRID-1.0",
     "title": "Meshes of a Moby-Dick model, finest first",
     "levels": np.int32(len(meshes)),
   }
+  for attributes in [dataset.attrs, *(variable.attrs for variable in dataset.variables.values())]:
+    attributes.update({key: _char(value) for key, value in attributes.items()})
   encoding = {name: _ENCODING for name, variable in dataset.variables.items() if variable.ndim}
   path = pathlib.Path(path)
   path.parent.mkdir(parents=True, exist_ok=True)
@@ -244,10 +288,11 @@ def read_mesh_file(path: pathlib.Path | str, level: int = 0) -> MeshData:
     if name not in dataset:
       raise ValueError(f"{path} has no mesh of level {level} ({int(dataset.attrs.get('levels', 0))} levels)")
     topology = dataset[name].attrs
-    vertices = np.stack([dataset[f"{name}_node_{axis}"].values for axis in "xyz"], axis=1)
+    vertices = np.stack([dataset[f"{name}_node_cartesian_{axis}"].values for axis in "xyz"], axis=1)
     edges = dataset[f"{name}_processor_edges"].values.astype(np.int64)
-    boundary = dataset[f"{name}_boundary"].values.astype(bool) if f"{name}_boundary" in dataset else None
-    mesh_size = dataset[f"{name}_mesh_size"].values if f"{name}_mesh_size" in dataset else None
+    nodes = f"{name}_nNodes"
+    boundary = _node_values(dataset, f"{name}_boundary", nodes).astype(bool) if f"{name}_boundary" in dataset else None
+    mesh_size = _node_values(dataset, f"{name}_mesh_size", nodes) if f"{name}_mesh_size" in dataset else None
     graph = MeshGraph(
       vertices=vertices,
       faces=dataset[f"{name}_face_nodes"].values.astype(np.int64),
@@ -257,10 +302,7 @@ def read_mesh_file(path: pathlib.Path | str, level: int = 0) -> MeshData:
     )
 
   def strings(value: object) -> list[str]:
-    # netCDF reads a list of one string back as a string.
-    if isinstance(value, str):
-      return [value]
-    return [str(item) for item in value] if isinstance(value, (list, tuple)) else []
+    return [value] if isinstance(value, str) else []
 
   logger.info(f"{name}: {len(vertices):,} nodes, {len(graph.faces):,} faces, {len(edges):,} edges")
   return MeshData(
@@ -273,10 +315,12 @@ def read_mesh_file(path: pathlib.Path | str, level: int = 0) -> MeshData:
 
 def read_size_fields(path: pathlib.Path | str, level: int = 0) -> dict[str, np.ndarray]:
   """The size fields of a mesh of a mesh file at its nodes, by field name (metres)."""
-  prefix = f"{level_name(level)}_size_"
+  prefix, nodes = f"{level_name(level)}_size_", f"{level_name(level)}_nNodes"
   with xr.open_dataset(path, engine="h5netcdf") as dataset:
     return {
-      str(name)[len(prefix) :]: dataset[name].values for name in dataset.data_vars if str(name).startswith(prefix)
+      str(name)[len(prefix) :]: _node_values(dataset, str(name), nodes)
+      for name in dataset.data_vars
+      if str(name).startswith(prefix)
     }
 
 
@@ -289,7 +333,12 @@ def read_links(path: pathlib.Path | str, level: int, other: int) -> tuple[np.nda
   with xr.open_dataset(path, engine="h5netcdf") as dataset:
     if f"{name}_face" not in dataset:
       raise ValueError(f"{path} has no links between levels {level} and {other}")
-    return dataset[f"{name}_face"].values, dataset[f"{name}_weights"].values, dataset[f"{name}_distance"].values
+    nodes = f"{level_name(level)}_nNodes"
+    return (
+      _node_values(dataset, f"{name}_face", nodes),
+      dataset[f"{name}_weights"].values,
+      _node_values(dataset, f"{name}_distance", nodes),
+    )
 
 
 def median_edge_length(mesh: MeshGraph) -> float:

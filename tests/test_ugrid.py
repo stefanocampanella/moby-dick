@@ -17,6 +17,7 @@ levels, and `moby-dick combine-meshes`."""
 
 import dataclasses
 
+import h5py
 import numpy as np
 import pytest
 import xarray as xr
@@ -53,8 +54,8 @@ def _ocean_like(splits: int = 2) -> MeshData:
 
 def test_a_mesh_reads_back_as_written(tmp_path):
   """Every array of a mesh comes back unchanged (vertices bit for bit, faces, directed edges, boundary, mesh size,
-  size fields), with its spatial reference system, description and license (lists of strings, line breaks
-  included)."""
+  size fields, the constant one too), with its spatial reference system, description and license (one text each:
+  the strings of a list come back joined by line breaks, line breaks inside them kept)."""
   mesh = _ocean_like()
   fields = {"uniform": np.full(len(mesh.mesh_graph.vertices), 1e6), "shore_proximity": 2 * np.asarray(mesh.mesh_size)}
   path = tmp_path / "mesh.nc"
@@ -70,7 +71,7 @@ def test_a_mesh_reads_back_as_written(tmp_path):
   assert graph.spatial_reference_system == expected.spatial_reference_system
   assert read.mesh_size is not None and mesh.mesh_size is not None
   np.testing.assert_array_equal(read.mesh_size, mesh.mesh_size)
-  assert read.description == mesh.description and read.license == mesh.license
+  assert read.description == ["\n".join(mesh.description)] and read.license == mesh.license
   sizes = ugrid.read_size_fields(path)
   assert set(sizes) == set(fields)
   for name, values in fields.items():
@@ -103,7 +104,48 @@ def test_the_file_follows_ugrid(tmp_path):
     np.testing.assert_allclose(dataset[lat_name].values, lat)
     np.testing.assert_allclose(dataset[lon_name].values, lon)
     assert dataset[lat_name].attrs["standard_name"] == "latitude"
-    assert dataset["mesh0_mesh_size"].attrs["location"] == "node"
+    assert dataset["mesh0_boundary"].attrs["location"] == "node"
+
+
+def test_the_file_opens_in_qgis_and_paraview(tmp_path):
+  """What QGIS 3.44 (MDAL) and ParaView 6.0 need, found by opening mesh files in them on 28 Nov 2026 (the apps are not
+  in CI): text attributes are NC_CHAR, as both read them with `nc_get_att_text` and found no mesh with NC_STRING
+  (h5netcdf's default for `str`); node fields are int32 or floating point, as MDAL reads no smaller integers; a node
+  field with one value everywhere is a scalar, as QGIS crashed on one (it comes back at every node); no variable is
+  named `<mesh>_node_z`, MDAL's fallback for the elevation; the [nodes, 3] link weights are no node field, which the
+  viewers would read as 3 values at as many times as nodes."""
+  fine, coarse = _ocean_like(2), _ocean_like(1)
+  constant = np.full(len(fine.mesh_graph.vertices), 1e6)
+  path = tmp_path / "hierarchy.nc"
+  ugrid.write_mesh_file(path, [fine, coarse], [{"uniform": constant}, None])
+  hdf5_internal = {"CLASS", "NAME", "DIMENSION_LIST", "REFERENCE_LIST", "_Netcdf4Dimid", "_Netcdf4Coordinates"}
+
+  def check_texts(name: str, item: h5py.HLObject) -> None:
+    for key in item.attrs:
+      kind = item.attrs.get_id(key).get_type()
+      if isinstance(kind, h5py.h5t.TypeStringID) and key not in hdf5_internal:
+        assert not kind.is_variable_str(), f"{name}: {key} is NC_STRING"
+
+  with h5py.File(path) as file:
+    check_texts("/", file)
+    file.visititems(check_texts)
+  with xr.open_dataset(path, engine="h5netcdf", decode_cf=False) as dataset:
+    fields = [name for name, variable in dataset.variables.items() if variable.attrs.get("location") == "node"]
+    assert "mesh0_boundary" in fields and "mesh0_node_in_mesh1_distance" in fields
+    for name in fields:
+      values = dataset[name].values
+      assert values.dtype in (np.int32, np.float32, np.float64), name
+      assert values.ndim == 1 and not (values == values[0]).all(), name
+    # The uniform size field, and the coarse nodes' distances (0: they are fine nodes), are scalars.
+    assert dataset["mesh0_size_uniform"].ndim == 0 and dataset["mesh1_node_in_mesh0_distance"].ndim == 0
+    assert not [name for name in dataset.variables if str(name).endswith("_node_z")]
+    assert "location" not in dataset["mesh0_node_in_mesh1_weights"].attrs
+  np.testing.assert_array_equal(ugrid.read_size_fields(path)["uniform"], constant)
+  distance = ugrid.read_links(path, 1, 0)[2]
+  assert distance.shape == (len(coarse.mesh_graph.vertices),) and (distance == 0).all()
+  read = ugrid.read_mesh_file(path, 1)
+  assert read.mesh_size is not None and coarse.mesh_size is not None
+  np.testing.assert_array_equal(read.mesh_size, coarse.mesh_size)
 
 
 def test_a_hierarchy_holds_every_level_and_the_links_between_them(tmp_path):
