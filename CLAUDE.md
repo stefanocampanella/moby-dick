@@ -25,8 +25,9 @@ NVIDIA JAX container `nvcr.io/nvidia/jax:26.09-py3` plus GDAL/PROJ from Spack). 
   stderr, on rank 0 only, `MOBYDICK_NO_BANNER=1` to silence it; `python -m mobydick` works too): `moby-dick train CONFIG.toml OUTPUT TRAIN_CKPT`,
   `moby-dick make-ocean-mesh CONFIG.toml OUTPUT.nc [--msh FILE]` (mesh from `configs/mesh/*.toml`, written as a mesh
   file, see "Mesh files" below; `--msh` also writes the mesh alone in gmsh's format, for viewing; paths are container
-  paths, as in the training configs: run it in the image with the data mounted, e.g. `apptainer exec --bind
-  data/geometry:/data/geometry moby-dick.sif python -m mobydick make-ocean-mesh configs/mesh/uniform_120km.toml
+  paths, as in the training configs: run it in the mesh image (`containers/mesh.def`; the training image has no
+  gmsh since 27 Nov 2026) with the data mounted, e.g. `apptainer exec --bind data/geometry:/data/geometry
+  moby-dick-mesh.sif moby-dick make-ocean-mesh configs/mesh/uniform_120km.toml
   /data/geometry/uniform_120km.nc`; the `lambrechts*` configs also need the bathymetry at `/data/bathymetry`; the
   coastline coarsening is the minimum of `[[coarsen_boundaries.fields]]`, like the mesh size of `[[fields]]`; there is
   no `--data-path` since 12 Nov 2026), `moby-dick combine-meshes OUTPUT.nc FINE.nc COARSE.nc ...` (mesh files of one
@@ -582,7 +583,8 @@ download-mask`. With the previous dataloader (zarr-python, standardizing per sam
 about 2 workers at all 50 depth levels. With the new one (29 Oct 2026) every setting from 0 x 4 to 4 x 2 keeps the
 GPUs busy at 50 levels and 8 x 2 runs out of host memory; the `.env` default is 1 worker x 2 threads.
 
-**Meshes**: `geospatial_mesh.py` (seamsh, coastline shapefiles) generates mesh files from `configs/mesh/*.toml`;
+**Meshes**: `meshing/geospatial_mesh.py` (seamsh, coastline shapefiles; the `mesh` extra) generates mesh files from
+`configs/mesh/*.toml`;
 generated meshes and geometry live in `data/geometry` (gitignored, bound as `/data/geometry`).
 - **Mesh files** (since 27 Nov 2026, `mobydick/ugrid.py`; decided: NetCDF-4 with h5netcdf, so that UGRID tools
   such as QGIS and ParaView open them; no `.msh` reader any more, meshes are regenerated rather than converted): one mesh or a
@@ -743,15 +745,19 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
       **and seamsh** (GPL-3.0: README, `COPYING.txt`, classifier; its file headers say LGPL-3.0-or-later, but
       `libseamsh.so` compiles gmsh's `polymesh.c`, GPL-2.0-or-later, so it cannot be LGPL as a whole).
     - Apache-2.0 code may be combined with GPL-3.0 code (one-way compatible; gmsh's "or later" allows GPL-3.0), so
-      moby-dick's own files stay Apache-2.0 and the repository (which contains no GPL code) is fine. But every
-      `moby-dick` command loads gmsh and seamsh (`mobydick/__init__.py` imports `geospatial_mesh`; training reads
-      `.msh` files with gmsh): distributing moby-dick *together with* them (e.g. `moby-dick.sif`, or a bundle) is
-      distributing a combined work under GPL-3.0 terms (source of everything, no further restrictions). The same
-      process also loads proprietary NVIDIA libraries (CUDA, cuDNN, CUTLASS DSL, through jaxlib), whose terms GPL-3.0
-      does not allow in a combined work unless they count as System Libraries: a gray area. Running on JUPITER is not
-      distribution; publishing the image would be. Remedy if needed (code change, not done): gmsh and seamsh as an
-      optional `meshing` extra, imported lazily, and `.msh` files read without gmsh (e.g. meshio, MIT), so that
-      training never loads GPL code.
+      moby-dick's own files stay Apache-2.0 and the repository (which contains no GPL code) is fine. Until 27 Nov
+      2026 every `moby-dick` command loaded gmsh and seamsh, so the training image (with NVIDIA's proprietary
+      libraries in the same process) could not be distributed. **Since 27 Nov 2026 (the settled plan of the seamsh
+      notes):** gmsh and seamsh are the optional `mesh` extra; only `mobydick.meshing` imports them (`make-ocean-mesh`,
+      loaded lazily by the CLI, which says what to install when the extra is missing); training reads UGRID mesh files
+      with xarray (`mobydick.ugrid`). The training image (`spack.yaml` without Ubuntu's `gmsh` and `python3-gmsh`) holds
+      no GPL code and its recipe checks that; `tests/test_mesh_extra.py` and the CI job `core` keep it so. The training
+      image itself stays unpublished (NVIDIA's terms: publish the recipe). The mesh image (`containers/mesh.def`,
+      micromamba `mambaorg/micromamba:2.10.0`, `containers/mesh-environment.yml`: conda-forge GDAL 3.13.1 and gmsh
+      4.15.2 with `python-gmsh`, which has the pip metadata, so `pip install ".[mesh]"` keeps it; PyPI has no aarch64
+      gmsh wheel) has no NVIDIA software and can be published as a GPL-3.0-or-later combination with sources and
+      licence texts (`/licenses`). It was not built on the laptop (no Apptainer): build it on JUPITER and run the mesh
+      tests in it. The CI job `tests` uses the same environment file.
     - Native libraries: GDAL, PROJ MIT; GEOS LGPL-2.1 (dynamically linked: fine); gcc runtime GPL with the runtime
       exception; Spack's and Ubuntu's readline (GPL-3.0) are not linked by GDAL; OpenCASCADE (with gmsh) LGPL-2.1.
     - The base image `nvcr.io/nvidia/jax` is governed by the NVIDIA Software License Agreement and Product-Specific

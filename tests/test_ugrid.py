@@ -25,6 +25,7 @@ from click.testing import CliRunner
 
 from mobydick import icosahedral_mesh, ugrid
 from mobydick.gis_utils import cartesian_to_lat_lon, cartesian_unit_sphere_crs
+from mobydick.mesh_commands import combine_meshes
 from mobydick.mesh_graph import MeshData, boundary_vertices, faces_to_edges
 
 
@@ -207,13 +208,13 @@ def test_combine_meshes(tmp_path):
   ugrid.write_mesh_file(coarse_path, [coarse])
   output = tmp_path / "hierarchy.nc"
   run = CliRunner().invoke
-  result = run(ugrid.combine_meshes, [str(output), str(fine_path), str(coarse_path), "--log-level", "warning"])
+  result = run(combine_meshes, [str(output), str(fine_path), str(coarse_path), "--log-level", "warning"])
   assert result.exit_code == 0, result.output
   assert ugrid.num_levels(output) == 2 and list(ugrid.read_size_fields(output, 0)) == ["uniform"]
   assert ugrid.read_links(output, 0, 1)[0].shape == (len(fine.mesh_graph.vertices),)
-  result = run(ugrid.combine_meshes, [str(tmp_path / "reversed.nc"), str(coarse_path), str(fine_path)])
+  result = run(combine_meshes, [str(tmp_path / "reversed.nc"), str(coarse_path), str(fine_path)])
   assert result.exit_code != 0 and "finest first" in result.output
-  result = run(ugrid.combine_meshes, [str(tmp_path / "nested.nc"), str(output), str(coarse_path)])
+  result = run(combine_meshes, [str(tmp_path / "nested.nc"), str(output), str(coarse_path)])
   assert result.exit_code != 0 and "holds 2 meshes" in result.output
-  result = run(ugrid.combine_meshes, [str(output), str(fine_path), str(coarse_path)])
+  result = run(combine_meshes, [str(output), str(fine_path), str(coarse_path)])
   assert result.exit_code != 0 and "--overwrite" in result.output

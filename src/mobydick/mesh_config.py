@@ -259,5 +259,5 @@ class IcosahedralMeshConfig(ApplicationConfig):
 
 
 def field_arguments(field: BaseModel) -> dict[str, Any]:
-  """Keyword arguments of a field's class (geospatial_mesh_utils.FieldsRegistry)."""
+  """Keyword arguments of a field's class (meshing.geospatial_mesh_utils.FieldsRegistry)."""
   return field.model_dump(exclude={"name"})

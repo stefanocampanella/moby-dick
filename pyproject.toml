@@ -21,7 +21,6 @@ dependencies = [
     # On macOS, gdal is installed via brew and should be updated to the latest version
     "gdal-utils == 3.13.3 ; sys_platform == 'darwin'",
     "gdal[numpy] == 3.13.3 ; sys_platform == 'darwin'",
-    "gmsh",
     "grain >= 0.2.16",
     "graphviz >= 0.21",
     # Mesh files: UGRID in NetCDF-4 (mobydick.ugrid), read and written with xarray.
@@ -47,8 +46,6 @@ dependencies = [
     # Without a lower bound, pip resolves botocore[crt] to a version aiobotocore rejects and falls back to s3fs 0.4
     "s3fs >= 2026.9.0",
     "scipy",
-    # The fork (upstream, on PyPI, is other code): install from a release tag, see the fork's doc/fork.rst.
-    "seamsh@git+https://github.com/stefanocampanella/seamsh.git@v0.6.0+fork",
     "tensorboard",
     "tensorflow >= 2.21.0",
     "tqdm",
@@ -68,7 +65,7 @@ keywords = ["Ocean", "Ocean circulation", "Graph neural networks", "Prediction"]
 classifiers = ["Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Oceanography",
     "Topic :: Scientific/Engineering :: Physics"]
@@ -80,6 +77,14 @@ moby-dick = "mobydick:cli"
 Homepage = "https://github.com/stefanocampanella/moby-dick"
 
 [project.optional-dependencies]
+# Mesh generation (moby-dick make-ocean-mesh, mobydick.meshing): gmsh (GPL-2.0-or-later) and seamsh (GPL-3.0), kept out
+# of the core so that training never loads GPL code. PyPI has no Linux aarch64 wheel of gmsh: install gmsh first from
+# conda-forge (python-gmsh, with its pip metadata) or a distribution package, as containers/mesh-environment.yml does.
+mesh = [
+    "gmsh",
+    # The fork (upstream, on PyPI, is other code): install from a release tag, see the fork's doc/fork.rst.
+    "seamsh@git+https://github.com/stefanocampanella/seamsh.git@v0.6.0+fork",
+]
 # networkx's GPU backend (CUDA 13) for the path metrics of moby-dick graph-statistics:
 # set NETWORKX_BACKEND_PRIORITY=cugraph.
 graph-gpu = ["nx-cugraph-cu13"]
@@ -156,3 +161,9 @@ extra-paths = ["src"]
 [tool.ty.src]
 # Submodules of the shell tests (bats-core's documentation has Python files).
 exclude = ["tests/bats/helpers"]
+
+# gmsh and seamsh are the optional `mesh` extra: without it (e.g. in the training image) their imports cannot be
+# resolved, only in the mesh generator and its tests.
+[[tool.ty.overrides]]
+include = ["src/mobydick/meshing/**", "tests/test_ocean_mesh.py", "tests/test_mesh_size_fields.py"]
+rules = { unresolved-import = "ignore" }

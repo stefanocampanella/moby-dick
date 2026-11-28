@@ -14,5 +14,8 @@ Every pull request is reviewed before it is merged.
 - **Licensing:** contributions are licensed under the Apache License, Version 2.0. New files start with SPDX
   copyright and license headers, as the existing files do (`REUSE.toml` covers files that take no comments). Code copied from GraphCast keeps DeepMind's copyright line, says that it was modified, and is listed in
   `NOTICE`.
+- **Mesh extra:** gmsh and seamsh (GPL) are the optional `mesh` extra. Only `mobydick.meshing` imports them, and no
+  module outside it imports `mobydick.meshing` (the CLI loads `make-ocean-mesh` lazily). Code that reads or writes
+  meshes uses `mobydick.ugrid`. `tests/test_mesh_extra.py` and the CI job `core` check this.
 - **Portability:** `scripts/` and `src/` hold no cluster-specific paths or settings; those go under
   `clusters/<name>/`, and user-specific settings (e.g. credentials) come from environment variables.

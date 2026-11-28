@@ -47,18 +47,15 @@ in the order of `mesh<b>_face_nodes`) and `mesh<a>_node_in_mesh<b>_distance` (me
 mesh-to-mesh decoder connectivity (3 edges per receiver) and the weights of an interpolating decoder.
 """
 
-import itertools
 import logging
 import pathlib
 from collections.abc import Mapping, Sequence
 
-import click
 import h5py
 import numpy as np
 import pyproj
 import xarray as xr
 
-from mobydick import cli_utils
 from mobydick.basis_utils import barycentric_coordinates
 from mobydick.gis_utils import cartesian_crs, cartesian_to_lat_lon
 from mobydick.mesh_graph import MeshData, MeshGraph
@@ -339,39 +336,3 @@ def read_links(path: pathlib.Path | str, level: int, other: int) -> tuple[np.nda
       dataset[f"{name}_weights"].values,
       _node_values(dataset, f"{name}_distance", nodes),
     )
-
-
-def median_edge_length(mesh: MeshGraph) -> float:
-  """Median length of the triangle edges (straight line, metres)."""
-  faces = np.asarray(mesh.faces)
-  vertices = np.asarray(mesh.vertices, np.float64)
-  lengths = np.linalg.norm(vertices[faces] - vertices[np.roll(faces, -1, axis=1)], axis=-1)
-  return float(np.median(lengths)) if lengths.size else float("nan")
-
-
-@click.command("combine-meshes")
-@click.argument("output_path", type=click.Path(path_type=pathlib.Path, dir_okay=False, writable=True))
-@click.argument("mesh_paths", nargs=-1, required=True, type=click.Path(path_type=pathlib.Path, exists=True))
-@click.option("--overwrite/--no-overwrite", default=False, help="Whether to overwrite an existing output")
-@cli_utils.LOG_LEVEL_OPTION
-def combine_meshes(output_path: pathlib.Path, mesh_paths: tuple[pathlib.Path, ...], overwrite: bool, log_level: str):
-  """Write the meshes of MESH_PATHS (mesh files of one mesh each, finest first) to OUTPUT_PATH as one hierarchy, with
-  the links between consecutive levels (closest face and barycentric weights, both ways).
-
-  Each level is meshed on its own (its coastline coarsened for its size, its own seeds), so the levels are not nested:
-  the links are computed here.
-  """
-  cli_utils.configure_logging(log_level)
-  if output_path.exists() and not overwrite:
-    raise click.ClickException(f"{output_path} exists: pass --overwrite to replace it")
-  meshes, size_fields = [], []
-  for path in mesh_paths:
-    if num_levels(path) != 1:
-      raise click.ClickException(f"{path} holds {num_levels(path)} meshes: combine files of one mesh each")
-    meshes.append(read_mesh_file(path))
-    size_fields.append(read_size_fields(path))
-  lengths = [median_edge_length(mesh.mesh_graph) for mesh in meshes]
-  if any(coarser < finer for finer, coarser in itertools.pairwise(lengths)):
-    km = ", ".join(f"{length / 1e3:.1f}" for length in lengths)
-    raise click.ClickException(f"The meshes must be given finest first; their median edges are {km} km")
-  write_mesh_file(output_path, meshes, size_fields)

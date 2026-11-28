@@ -50,6 +50,11 @@ under the Apache License, Version 2.0 or the MIT license, at your option, and di
   Copyright Spack Project Developers
   https://github.com/spack/spack
 
+Optional third-party software (not part of this repository): the `mesh` extra installs gmsh (GPL-2.0-or-later,
+https://gmsh.info) and seamsh (GPL-3.0-or-later as of 0.6.0+fork, https://github.com/stefanocampanella/seamsh, a
+fork of https://git.immc.ucl.ac.be/jlambrechts/seamsh). Only mobydick.meshing imports them; an image that contains
+them (containers/mesh.def) is a combination distributed under GPL-3.0-or-later terms.
+
 All other files are original to this project. Images and animations are licensed under the Creative Commons
 Attribution 4.0 International License (LICENSES/CC-BY-4.0.txt); the Argonne, GRC and OGS logos in assets/poster.svg
 are trademarks of their owners and are not covered by it. REUSE.toml and the SPDX headers give the copyright and

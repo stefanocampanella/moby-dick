@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Stefano Campanella
+# SPDX-License-Identifier: Apache-2.0
+
+# Environment of the mesh image (containers/mesh.def) and of the CI job `tests`: conda-forge's gmsh, with its Python
+# module and pip metadata (PyPI has no Linux aarch64 wheel of gmsh), and GDAL. moby-dick and its other dependencies
+# are then installed with pip: pip install ".[mesh]".
+name: moby-dick-mesh
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  # Keep in sync with spack.yaml (the training image). PROJ is not pinned: conda-forge's GDAL 3.13.1 needs PROJ >= 9.8.1.
+  - gdal=3.13.1
+  # gmsh's release (Ubuntu's 4.12.1 crashes with the quadrangle algorithm). Its valence repair (Mesh.ValenceRepair2D)
+  # is only on gmsh's branch valence-repair-2d: switch when released.
+  - gmsh=4.15.2
+  - python-gmsh=4.15.2
+  # seamsh compiles its C library when it is installed, from the git tag pinned in pyproject.toml.
+  - c-compiler
+  - git
+  - pip

@@ -1850,6 +1850,33 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - Points closest to a degenerate face get weight 1 on its nearest vertex instead of NaN.
   - Stale CLAUDE.md bullets are updated.
 
+## 2026-11-27 19:40: gmsh and seamsh in the optional mesh extra
+
+- **Change:**
+  - Mesh generation moves to `mobydick/meshing/` (`geospatial_mesh.py`, `geospatial_mesh_utils.py`), the only code
+    that imports gmsh and seamsh. Both are in the extra `mesh` of `pyproject.toml`.
+  - The CLI loads `make-ocean-mesh` lazily; without the extra, `--help` lists it as not installed and running it says
+    `pip install "moby-dick[mesh]"`.
+  - `make-icosahedral-mesh` and `combine-meshes` need no mesh generator: they move to `mobydick/mesh_commands.py`.
+  - Tests: meshing in `tests/test_ocean_mesh.py` and the size fields, both skipped without the extra; in
+    `tests/test_mesh_extra.py`, the core modules load neither gmsh nor seamsh, in a fresh interpreter, and the CLI
+    works without them.
+  - CI:
+    - `tests` builds its environment from `containers/mesh-environment.yml` (conda-forge GDAL 3.13.1, gmsh 4.15.2
+      with `python-gmsh`) and installs `.[mesh]`;
+    - the new job `core` installs without the extra, checks that gmsh and seamsh are neither installed nor loaded,
+      and runs the tests.
+  - Images:
+    - `spack.yaml` drops Ubuntu's gmsh, and the training recipe checks that neither module is there;
+    - new mesh image `containers/mesh.def` (micromamba 2.10.0, no NVIDIA software, GPL-3.0-or-later combination,
+      licence texts in `/licenses`).
+  - README (installation, third-party paragraph), NOTICE and CONTRIBUTING (no core module imports
+    `mobydick.meshing`).
+- **Insight:**
+  - conda-forge has GDAL 3.13.1 and gmsh 4.15.2 for linux-aarch64, which the seamsh notes had left unchecked.
+  - A core-only environment on the laptop passes the tests, with the three mesh modules skipped.
+  - The images were not built: there is no Apptainer on the laptop.
+
 ## 2026-11-28 09:40: the mesh files did not open in QGIS or ParaView
 
 - **Request:** the maintainer tried the new mesh files in ParaView and QGIS; both failed.

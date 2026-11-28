@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2026 Stefano Campanella
+# SPDX-License-Identifier: Apache-2.0
+#
+# The mesh image: moby-dick with the `mesh` extra (gmsh, seamsh) on conda-forge, without NVIDIA's software, for
+# `moby-dick make-ocean-mesh` and the mesh tests. It combines GPL code (gmsh GPL-2.0-or-later, seamsh 0.6.0+fork
+# GPL-3.0-or-later, its License-Expression) with
+# moby-dick (Apache-2.0): distribute it as a GPL-3.0-or-later combination, with the sources at the commits of the labels
+# and the license texts in /licenses. Build it from the repository root:
+#
+#     apptainer build moby-dick-mesh.sif containers/mesh.def
+
+Bootstrap: docker
+# A pinned release of the micromamba image (update together with the environment file).
+From: mambaorg/micromamba:2.10.0
+
+%files
+  containers/mesh-environment.yml /app/mesh-environment.yml
+  pyproject.toml /app/pyproject.toml
+  README.md /app/README.md
+  src/mobydick /app/src/mobydick
+  LICENSES /licenses/moby-dick
+  NOTICE /licenses/moby-dick/NOTICE
+
+# bash, not the default /bin/sh (dash in this image); no activation: the environment's binaries by their paths.
+%post -c /bin/bash
+  set -euo pipefail
+  export MAMBA_ROOT_PREFIX=/opt/conda
+  micromamba create --yes --root-prefix /opt/conda --name mesh --file /app/mesh-environment.yml
+  # The license texts of the conda packages (gmsh, GDAL, PROJ, ...), from the package cache, before cleaning it.
+  for info in /opt/conda/pkgs/*/info/licenses; do
+    package=$(basename "$(dirname "$(dirname "$info")")")
+    mkdir -p "/licenses/conda/$package"
+    cp -r "$info/." "/licenses/conda/$package/"
+  done
+  micromamba clean --all --yes
+  python=/opt/conda/envs/mesh/bin/python
+  "$python" -m pip install --upgrade "pip >= 25.1"
+  "$python" -m pip install "/app[mesh]" --group /app/pyproject.toml:dev
+  # gmsh must be conda-forge's release, not a wheel pip installed in its place.
+  "$python" -c "import gmsh, seamsh; assert gmsh.__version__ == '4.15.2', gmsh.__version__"
+  "$python" -c "from osgeo import gdal_array"
+  # seamsh's license texts, with their relative paths (its source is at the tag of its pin in pyproject.toml).
+  "$python" - <<'PY'
+import importlib.metadata, pathlib, shutil
+distribution = importlib.metadata.distribution("seamsh")
+for file in distribution.files or []:
+  parts = pathlib.PurePath(file).parts
+  if "licenses" in parts:
+    target = pathlib.Path("/licenses/seamsh", *parts[parts.index("licenses") + 1 :])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(distribution.locate_file(file), target)
+PY
+
+%environment
+  export MAMBA_ROOT_PREFIX=/opt/conda
+  export PATH=/opt/conda/envs/mesh/bin:$PATH
+
+%labels
+  org.opencontainers.image.title moby-dick mesh image
+  org.opencontainers.image.licenses GPL-3.0-or-later
+  org.opencontainers.image.source https://github.com/stefanocampanella/moby-dick
+  seamsh.source https://github.com/stefanocampanella/seamsh
+
+%runscript
+  exec moby-dick "$@"

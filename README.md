@@ -68,11 +68,21 @@ apptainer build moby-dick.sif moby-dick.def
 
 Set `APPTAINERENV_PYTHONPATH` to the checkout's `src` directory to run the sources without rebuilding the image.
 
+This training image holds no mesh generator. Meshes are made in the mesh image (`containers/mesh.def`: conda-forge's
+GDAL and gmsh, `containers/mesh-environment.yml`, and moby-dick with the `mesh` extra):
+
+```bash
+apptainer build moby-dick-mesh.sif containers/mesh.def
+```
+
 Without containers, Python 3.12 and GDAL 3.13.1 are needed; then:
 
 ```bash
-pip install -e . --group dev
+pip install -e . --group dev            # training and every command but make-ocean-mesh
+pip install -e ".[mesh]" --group dev    # also make-ocean-mesh (gmsh and seamsh)
 ```
+
+PyPI has no gmsh wheel for Linux on aarch64: there, install gmsh first (e.g. `python-gmsh` from conda-forge).
 
 The distribution is called `moby-dick` and the import package `mobydick`. It is not on PyPI yet.
 
@@ -135,6 +145,14 @@ started as a fork of [GraphCast](https://github.com/google-deepmind/graphcast) (
 Limited, Apache-2.0): files with code from GraphCast keep its copyright notice and are listed in `NOTICE`. The license
 grants no rights to the names of DeepMind, Google or GraphCast, which are used here only to describe the origin of
 the work. Licensing follows the [REUSE specification](https://reuse.software/spec-3.3/).
+
+Third-party software:
+- **Mesh generation:** the optional `mesh` extra installs gmsh (GPL-2.0-or-later) and seamsh (GPL-3.0-or-later as
+  of 0.6.0+fork). Only `moby-dick make-ocean-mesh` loads them (`mobydick.meshing`). The mesh image (`containers/mesh.def`) combines them
+  with moby-dick and is distributed under GPL-3.0-or-later terms.
+- **Training image:** it is built on NVIDIA's JAX container, under NVIDIA's own terms, and holds no GPL code. Its
+  recipe (`spack.yaml`, `spack/templates/container/moby-dick.def`) is published, not the image: whoever builds it
+  accepts NVIDIA's terms. Meshes and trained models are outputs, not covered by these licenses.
 
 GraphCast is described in:
 
