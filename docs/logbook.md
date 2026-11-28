@@ -1926,7 +1926,7 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
 - **Found by opening the files** in QGIS 3.44.7 (its Python, a throwaway profile) and ParaView 6.0.1 (`pvpython --dr`),
   removing variables until they opened:
   - text attributes as NC_CHAR (fixed-length UTF-8); description and license one text each;
-  - MDAL reads node fields of int32 or floating point only: `boundary` is int32 (int8 before);
+  - MDAL reads node fields of int32 or floating point only: `boundary` and `_inside` are int32 (int8 before);
   - QGIS crashes (SIGBUS) on a node field with one non-zero value everywhere, e.g. a uniform size field: such fields
     are scalars, broadcast when read;
   - `node_x/y/z` became `node_cartesian_x/y/z`: MDAL takes `<mesh>_node_z` for the elevation;

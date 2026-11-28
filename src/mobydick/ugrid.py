@@ -233,8 +233,13 @@ def links_dataset(fine: MeshGraph, coarse: MeshGraph, fine_level: int) -> xr.Dat
     )
     variables[f"{name}_inside"] = xr.Variable(
       nodes,
-      inside.astype(np.int8),
-      {**attributes, "flag_values": np.array([0, 1], dtype=np.int8), "long_name": f"Node within {level_name(b)}"},
+      inside.astype(np.int32),
+      {
+        **attributes,
+        "flag_values": np.array([0, 1], dtype=np.int32),
+        "flag_meanings": "outside inside",
+        "long_name": f"Node within {level_name(b)}",
+      },
     )
   return xr.Dataset(variables)
 

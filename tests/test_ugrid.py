@@ -132,18 +132,20 @@ def test_the_file_opens_in_qgis_and_paraview(tmp_path):
     file.visititems(check_texts)
   with xr.open_dataset(path, engine="h5netcdf", decode_cf=False) as dataset:
     fields = [name for name, variable in dataset.variables.items() if variable.attrs.get("location") == "node"]
-    assert "mesh0_boundary" in fields and "mesh0_node_in_mesh1_distance" in fields
+    assert {"mesh0_boundary", "mesh0_node_in_mesh1_distance", "mesh0_node_in_mesh1_inside"} <= set(fields)
     for name in fields:
       values = dataset[name].values
       assert values.dtype in (np.int32, np.float32, np.float64), name
       assert values.ndim == 1 and not (values == values[0]).all(), name
-    # The uniform size field, and the coarse nodes' distances (0: they are fine nodes), are scalars.
-    assert dataset["mesh0_size_uniform"].ndim == 0 and dataset["mesh1_node_in_mesh0_distance"].ndim == 0
+    # The uniform size field, and the coarse nodes' distances (0: they are fine nodes) and `inside`, are scalars.
+    for name in ("mesh0_size_uniform", "mesh1_node_in_mesh0_distance", "mesh1_node_in_mesh0_inside"):
+      assert dataset[name].ndim == 0, name
     assert not [name for name in dataset.variables if str(name).endswith("_node_z")]
     assert "location" not in dataset["mesh0_node_in_mesh1_weights"].attrs
   np.testing.assert_array_equal(ugrid.read_size_fields(path)["uniform"], constant)
-  distance = ugrid.read_links(path, 1, 0)[2]
-  assert distance.shape == (len(coarse.mesh_graph.vertices),) and (distance == 0).all()
+  _, _, distance, inside = ugrid.read_links(path, 1, 0)
+  assert distance.shape == inside.shape == (len(coarse.mesh_graph.vertices),)
+  assert (distance == 0).all() and inside.all()
   read = ugrid.read_mesh_file(path, 1)
   assert read.mesh_size is not None and coarse.mesh_size is not None
   np.testing.assert_array_equal(read.mesh_size, coarse.mesh_size)
