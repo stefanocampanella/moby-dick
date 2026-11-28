@@ -26,6 +26,37 @@ from mobydick.mesh_graph import Mesh
 logger = logging.getLogger(__name__)
 
 
+def barycentric_coordinates(mesh: Mesh, points: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+  """The face of the mesh closest to each point, the barycentric coordinates of the closest point in it, and the
+  distance to it (0 for points on the mesh).
+
+  Args:
+    mesh: Triangular mesh, in metres (see `compute_basis`).
+    points: Points [num_points, 3], in the coordinates of the mesh.
+
+  Returns:
+    Face indices [num_points], non-negative weights of the face's three vertices, in the order of `mesh.faces`, summing
+    to 1 [num_points, 3], and distances [num_points] in the units of the coordinates.
+  """
+  # Without processing, trimesh keeps the order of the faces (it would merge vertices and drop degenerate faces).
+  surface = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=False)
+  closest, distances, face_indices = trimesh.proximity.closest_point(surface, points)
+  # Degenerate faces divide by zero (handled below).
+  with np.errstate(divide="ignore", invalid="ignore"):
+    weights = trimesh.triangles.points_to_barycentric(mesh.vertices[mesh.faces[face_indices]], closest)
+  # A closest point on an edge or a vertex can get weights a rounding error below zero.
+  weights = np.clip(weights, 0.0, None)
+  weights /= weights.sum(axis=1, keepdims=True)
+  # A degenerate face (zero area) has no barycentric coordinates (NaN): all the weight on its vertex nearest the point.
+  if not (finite := np.isfinite(weights).all(axis=1)).all():
+    rows = np.flatnonzero(~finite)
+    corners = mesh.vertices[mesh.faces[face_indices[rows]]]
+    nearest = np.linalg.norm(corners - points[rows, None, :], axis=-1).argmin(axis=1)
+    weights[rows] = np.eye(3)[nearest]
+    logger.warning(f"{len(rows)} point(s) closest to degenerate faces: weight 1 on the face's nearest vertex")
+  return np.asarray(face_indices), weights, np.asarray(distances)
+
+
 def compute_basis(mesh: Mesh, points: np.ndarray, dtype: type[np.floating] = np.float32) -> sparse.csr_matrix:
   """Values of the mesh's linear basis functions at arbitrary points: grid points (mesh to grid) or the vertices of
   another mesh (mesh to mesh).
@@ -51,14 +82,8 @@ def compute_basis(mesh: Mesh, points: np.ndarray, dtype: type[np.floating] = np.
     (some are 0 at its edges and vertices), summing to 1.
   """
   logger.info(f"Evaluating {len(mesh.vertices)} basis functions at {len(points)} points.")
-  # Without processing, trimesh keeps the order of the faces (it would merge vertices and drop degenerate faces).
-  surface = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=False)
-  closest, _, face_indices = trimesh.proximity.closest_point(surface, points)
+  face_indices, weights, _ = barycentric_coordinates(mesh, points)
   faces = mesh.faces[face_indices]
-  weights = trimesh.triangles.points_to_barycentric(mesh.vertices[faces], closest)
-  # A closest point on an edge or a vertex can get weights a rounding error below zero.
-  weights = np.clip(weights, 0.0, None)
-  weights /= weights.sum(axis=1, keepdims=True)
   rows = np.repeat(np.arange(len(points)), 3)
   # Exactly 3 entries per row (the vertices of the face, a weight may be 0), like the decoder's edges.
   return sparse.csr_matrix(

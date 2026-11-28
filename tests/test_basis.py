@@ -24,9 +24,9 @@ from scipy.spatial import ConvexHull, Delaunay
 from mobydick import basis_utils, icosahedral_mesh, mesh_connectivity
 from mobydick.basis import compute_grid_basis_command
 from mobydick.dataloader_utils import get_grid
-from mobydick.geospatial_mesh_utils import write_multi_mesh
 from mobydick.gis_utils import cartesian_crs, cartesian_unit_sphere_crs, equirectangular_crs, get_transform
 from mobydick.mesh_graph import TriangleMesh
+from mobydick.ugrid import write_mesh_file
 
 LAT = np.arange(-85.0, 90.0, 10.0)
 LON = np.arange(0.0, 360.0, 10.0)
@@ -210,8 +210,8 @@ def test_basis_against_the_stereographic_draft(cap_radius):
 def test_compute_cli(tmp_path, mask_path):
   """`moby-dick compute-grid-basis` reads the mesh and the mask written by moby-dick download-mask, and saves the basis
   on the ocean points of that grid; an existing output is replaced only with --overwrite."""
-  mesh_path = tmp_path / "mesh.msh"
-  write_multi_mesh(icosahedral_mesh.get_multi_mesh_data(1), mesh_path)
+  mesh_path = tmp_path / "mesh.nc"
+  write_mesh_file(mesh_path, [icosahedral_mesh.get_multi_mesh_data(1)])
   output = tmp_path / "basis.npz"
   arguments = [str(mesh_path), mask_path, str(output), "--log-level", "warning"]
 
@@ -250,3 +250,12 @@ def test_grid_basis_interpolates_a_function_given_at_the_mesh_vertices(mask):
   assert errors[-1] < 1e-2
   ratios = np.array(errors[:-1]) / np.array(errors[1:])
   assert np.all((ratios > 3.0) & (ratios < 5.5)), (errors, ratios)
+
+
+def test_points_closest_to_a_degenerate_face_get_its_nearest_vertex():
+  """A face of zero area has no barycentric coordinates: a point closest to it gets weight 1 on the face's vertex
+  nearest to it, instead of NaN weights (which an interpolating decoder would spread)."""
+  vertices = np.array([[0.0, 0.0, 0.0], [1e5, 0.0, 0.0], [2e5, 0.0, 0.0]])
+  mesh = TriangleMesh(vertices=vertices, faces=np.array([[0, 1, 2]]))
+  _, weights, _ = basis_utils.barycentric_coordinates(mesh, np.array([[1.9e5, 1e3, 0.0]]))
+  np.testing.assert_array_equal(weights, [[0.0, 0.0, 1.0]])

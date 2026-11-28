@@ -1787,3 +1787,83 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - a seed in the inland sea gives a second component;
   - a 3,000 km mesh size makes that sea one triangle, with the warning;
   - a 1,500 km coarsening loses it, with seamsh's warning.
+
+## 2026-11-27 19:00: mesh files in UGRID NetCDF-4, no .msh reader
+
+- **Request:**
+  - Decide between Zarr and NetCDF for the UGRID mesh file: NetCDF-4 with h5netcdf, so that QGIS and ParaView open
+    it.
+  - The file holds every mesh, the size fields, the connectivity between meshes and the barycentric weights for the
+    interpolating decoder.
+  - Drop the `.msh` reader: meshes are regenerated, not converted.
+- **Change:**
+  - `mobydick/ugrid.py`:
+    - one topology `mesh<l>` per level, finest first;
+    - node x/y/z read back bit for bit, plus lon/lat for the tools;
+    - faces, directed processor edges, boundary, mesh size and each size field;
+    - closest face, weights and distance between consecutive levels, both ways.
+  - `make-ocean-mesh OUTPUT.nc [--msh FILE]` and `make-icosahedral-mesh OUTPUT.nc` write mesh files.
+    `make-ocean-mesh` takes the nodes of the triangles only and the boundary from the faces, and computes the size
+    fields there.
+  - New command `combine-meshes`: files of one mesh each, finest first, become one hierarchy.
+  - Training (`[mesh] path`, `level`), `graph-statistics` (`level` per mesh) and `compute-grid-basis --level` read the
+    file.
+  - Removed: `read_mesh`, `read_mesh_data`, `write_multi_mesh`, the isolated-node handling, and the config fields
+    `view_tag_name`, `mesh_size_tag_name` and `step`.
+  - `basis_utils.barycentric_coordinates` is shared by `compute_basis` and the links.
+  - New dependency: h5netcdf.
+  - The configs, `mesh_study.sh` and JUBE name `.nc` files (`summarize.py` reads both).
+- **To do on JUPITER:** regenerate the meshes as `.nc`, with the image rebuilt for h5netcdf. Until then
+  `APPTAINERENV_PYTHONPATH` sources fail on `import h5netcdf`.
+
+## 2026-11-27 19:30: high-effort code reviews of the four PRs
+
+- **Request:** run `/code-review high` on every PR of the stack, the earlier ones included. Publish the planned PRs
+  on the maintainer's behalf, for review at the end as a stack.
+- **#9 (laptop, gitleaks, bats):**
+  - The stand-ins joined their arguments with `$*`, which hid split arguments: they now quote each one with
+    `printf %q`.
+  - Lmod's exported `module` function would have won over the stand-in on JUPITER login nodes: `common_setup` now
+    removes it.
+  - The test without Apptainer found a system Apptainer in /usr/bin: its PATH now has links to bash and getopt only.
+  - The bats hook says how to get the submodules. The CI job fails if any test is skipped.
+  - The sharding tolerance is loosened on macOS only.
+- **#10 (quality targets):**
+  - Degenerate faces (NaN) count as poor and fail the targets.
+  - A target of no inverted faces.
+  - `max_percent_poor` compares with `<=`.
+  - The locations of the poor faces get a table of their own.
+  - Positions name their hemispheres, and `small_component_max_faces = 0` turns the check off.
+- **#11 (seeds), important:** equirectangular seeds were (longitude, latitude), while the `point_refinement` points
+  of the same section are (latitude, longitude), so a strait copied into the seeds landed on land. Seeds are now
+  (latitude, longitude), range-checked, and swapped for seamsh. Also:
+  - `x0_projection` is stereographic or equirectangular;
+  - every piece of the mesh is logged at INFO, since a seed on land gives no warning;
+  - the two-seed test checks the specific messages.
+- **#12 (UGRID):**
+  - Descriptions and licenses round-trip as lists of strings; joining them on line breaks split TOML multi-line
+    strings.
+  - UGRID's `edge_node_connectivity` holds the faces' edges once each; the processor's directed edges are in
+    `mesh<l>_processor_edges`.
+  - Only WGS84 Earth-centred meshes are written.
+  - `--msh` keeps the license and description.
+  - Points closest to a degenerate face get weight 1 on its nearest vertex instead of NaN.
+  - Stale CLAUDE.md bullets are updated.
+
+## 2026-11-28 09:40: the mesh files did not open in QGIS or ParaView
+
+- **Request:** the maintainer tried the new mesh files in ParaView and QGIS; both failed.
+- **Cause:** every attribute was NC_STRING (h5netcdf's default for `str`), and both readers take text attributes with
+  `nc_get_att_text`: ParaView said "File does not contain a mesh", QGIS fell back to GDAL and showed the face table
+  as a raster. The compatibility had been claimed, not tried.
+- **Found by opening the files** in QGIS 3.44.7 (its Python, a throwaway profile) and ParaView 6.0.1 (`pvpython --dr`),
+  removing variables until they opened:
+  - text attributes as NC_CHAR (fixed-length UTF-8); description and license one text each;
+  - MDAL reads node fields of int32 or floating point only: `boundary` is int32 (int8 before);
+  - QGIS crashes (SIGBUS) on a node field with one non-zero value everywhere, e.g. a uniform size field: such fields
+    are scalars, broadcast when read;
+  - `node_x/y/z` became `node_cartesian_x/y/z`: MDAL takes `<mesh>_node_z` for the elevation;
+  - the link weights [nodes, 3] are no node field any more (viewers read them as a time series).
+- **Result:** QGIS opens every level of the hierarchy with its fields; ParaView opens files of one mesh, not
+  hierarchies (its reader takes the first mesh and reads the node fields of every level as the first's).
+- Mesh files of 27 Nov must be regenerated.

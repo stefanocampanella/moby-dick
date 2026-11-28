@@ -12,7 +12,7 @@
         <tag name="memfit">GPU memory fit: uniform meshes from coarse (120 km) to fine (704078 nodes) with 8 to 16 message passing steps, zarr_v2 2x2</tag>
         <tag name="one_worker">memfit with 1 Grain worker x 2 threads instead of 2 x 2 (less host memory)</tag>
         <tag name="no_workers">memfit with Grain threads only (0 workers x 4 threads, no worker processes)</tag>
-        <tag name="fine">Use the finest mesh (uniform_25km.msh) instead of the 120 km one (the benchmark default)</tag>
+        <tag name="fine">Use the finest mesh (uniform_25km.nc) instead of the 120 km one (the benchmark default)</tag>
         <tag name="msg12">12 message passing steps (gnn_msg_steps) instead of 8 (the benchmark default)</tag>
         <tag name="msg16">16 message passing steps, as the original GraphCast</tag>
         <tag name="quick">One repetition of 30 steps instead of two of 60</tag>
@@ -68,13 +68,13 @@
             <parameter name="ckpt_interval" type="int">1000000</parameter>
 
             <!-- Model size: mesh and message passing steps; later definitions replace earlier ones. -->
-            <parameter name="mesh_file" tag="!fine">uniform_120km.msh</parameter>
-            <parameter name="mesh_file" tag="fine">uniform_25km.msh</parameter>
+            <parameter name="mesh_file" tag="!fine">uniform_120km.nc</parameter>
+            <parameter name="mesh_file" tag="fine">uniform_25km.nc</parameter>
             <!-- Target mesh sizes 120, 100, 85, 70, 60, 50, 40, 35, 30 and 25 km: 34750, 48662, 65943, 95303, 127948,
                  181980, 280245, 363900, 491676 and 704078 nodes (configs/mesh/uniform_*.toml). -->
             <parameter name="mesh_file" tag="memfit">
-                uniform_120km.msh,uniform_100km.msh,uniform_85km.msh,uniform_70km.msh,uniform_60km.msh,uniform_50km.msh,
-                uniform_40km.msh,uniform_35km.msh,uniform_30km.msh,uniform_25km.msh
+                uniform_120km.nc,uniform_100km.nc,uniform_85km.nc,uniform_70km.nc,uniform_60km.nc,uniform_50km.nc,
+                uniform_40km.nc,uniform_35km.nc,uniform_30km.nc,uniform_25km.nc
             </parameter>
             <parameter name="msg_steps" type="int">8</parameter>
             <parameter name="msg_steps" type="int" tag="msg12">12</parameter>

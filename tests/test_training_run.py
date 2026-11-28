@@ -32,8 +32,8 @@ from click.testing import CliRunner
 
 from mobydick import checkpoint, icosahedral_mesh
 from mobydick.downloader import compute_tendency_std
-from mobydick.geospatial_mesh_utils import write_multi_mesh
 from mobydick.leviathan.model import CheckPoint
+from mobydick.ugrid import write_mesh_file
 
 REPOSITORY = pathlib.Path(__file__).parents[1]
 PRODUCTION_CONFIG = REPOSITORY / "configs" / "training" / "production_run.toml"
@@ -73,8 +73,8 @@ def setup(standardized_path, mask_path, tmp_path_factory) -> dict[str, Any]:
   tendency_std = root / "tendency_std"
   result = CliRunner().invoke(compute_tendency_std, [standardized_path, str(tendency_std), "--log-level", "warning"])
   assert result.exit_code == 0, result.output
-  mesh = root / "mesh.msh"
-  write_multi_mesh(icosahedral_mesh.get_multi_mesh_data(1), mesh)
+  mesh = root / "mesh.nc"
+  write_mesh_file(mesh, [icosahedral_mesh.get_multi_mesh_data(1)])
 
   text = PRODUCTION_CONFIG.read_text()
   for pattern, replacement in (

@@ -36,6 +36,7 @@ from mobydick.graph_statistics.graphs import Graph, model_graphs
 from mobydick.graph_statistics.quantities import described, histogram, summarize
 from mobydick.graph_statistics.report import print_summary
 from mobydick.mesh_graph import MeshData
+from mobydick.ugrid import read_mesh_file
 
 logger = logging.getLogger(__name__)
 
@@ -175,15 +176,13 @@ def graph_statistics_command(
   and writes every value, with its description, to OUTPUT_PATH (JSON). The environment variable
   NETWORKX_BACKEND_PRIORITY selects a networkx backend for the path metrics (e.g. cugraph, with the graph-gpu
   extra)."""
-  from mobydick.geospatial_mesh_utils import read_mesh_data
-
   cli_utils.configure_logging(log_level)
   config, regions_config = read_settings(config_path, regions_path)
   if output_path.exists() and not overwrite:
     raise click.ClickException(f"{output_path} exists: pass --overwrite to replace it")
   logger.info(f"Using settings: {config!r}, networkx backend priority {nx.config.backend_priority}")
   with _timed(f"Read {len(config.meshes)} mesh(es) and the mask"):
-    meshes = [read_mesh_data(mesh.path) for mesh in config.meshes]
+    meshes = [read_mesh_file(mesh.path, mesh.level) for mesh in config.meshes]
     grid = get_grid(config.mask)
   results = compute(meshes, grid, config, regions_config)
   # The JSON first: the results are kept even if printing fails.

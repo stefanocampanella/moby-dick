@@ -18,13 +18,12 @@ import logging
 import pathlib
 
 import click
-import gmsh
 from scipy import sparse
 
 from mobydick import cli_utils
 from mobydick.basis_utils import compute_grid_basis
 from mobydick.dataloader_utils import get_grid
-from mobydick.geospatial_mesh_utils import read_mesh
+from mobydick.ugrid import read_mesh_file
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +38,14 @@ logger = logging.getLogger(__name__)
   help="Whether to overwrite existing outputs",
   is_flag=True,
 )
+@click.option("--level", default=0, type=click.IntRange(min=0), help="Mesh of the file (0: the finest)")
 @cli_utils.LOG_LEVEL_OPTION
 def compute_grid_basis_command(
   mesh_path: pathlib.Path,
   mask_path: pathlib.Path,
   output_path: pathlib.Path,
   overwrite: bool = False,
+  level: int = 0,
   log_level: str = "info",
 ):
   """Evaluate the linear basis functions of the mesh at MESH_PATH on the ocean points of the mask at MASK_PATH
@@ -54,10 +55,7 @@ def compute_grid_basis_command(
   if output_path.exists() and not overwrite:
     raise click.ClickException(f"{output_path} exists: pass --overwrite to replace it")
   grid = get_grid(mask_path)
-  if not gmsh.is_initialized():
-    gmsh.initialize()
-  gmsh.option.set_number("General.Verbosity", 2)
-  mesh, _ = read_mesh(mesh_path, mesh_size_tag_name=None)
+  mesh = read_mesh_file(mesh_path, level).mesh_graph
   basis = compute_grid_basis(mesh, latitudes=grid.lat, longitudes=grid.lon, mask=grid.mask)
   logger.info(f"Saving the basis ({basis.shape[0]} points, {basis.shape[1]} vertices) to {output_path}")
   output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -11,7 +11,8 @@ umbrella import package `mobydick` (shared code), one subpackage per model (firs
 `Leviathan`, Haiku module `leviathan`), environment variables `MOBYDICK_*` for all models (model-specific ones
 `MOBYDICK_<MODEL>_*`), image `moby-dick.sif`. GraphCast stays named where the text describes the origin (headers,
 NOTICE, comparisons with upstream); data paths and the checkout directory still say `graphcast`.
-Leviathan runs on unstructured triangular ocean meshes (seamsh/gmsh `.msh` files), not the icosahedral multi-mesh. The main target system is JUPITER (JSC, GH200 GPUs, Slurm partition `booster`).
+Leviathan runs on unstructured triangular ocean meshes (made with seamsh and gmsh, stored as UGRID NetCDF-4 mesh
+files since 27 Nov 2026, `.msh` before), not the icosahedral multi-mesh. The main target system is JUPITER (JSC, GH200 GPUs, Slurm partition `booster`).
 The README describes the project (rewritten on 8 Nov 2026); `TODO.md` lists open work.
 
 ## Environment and commands
@@ -22,12 +23,15 @@ NVIDIA JAX container `nvcr.io/nvidia/jax:26.09-py3` plus GDAL/PROJ from Spack). 
 
 - CLI (`src/mobydick/__init__.py`, click; every command first prints the banner `src/mobydick/assets/banner.txt` to
   stderr, on rank 0 only, `MOBYDICK_NO_BANNER=1` to silence it; `python -m mobydick` works too): `moby-dick train CONFIG.toml OUTPUT TRAIN_CKPT`,
-  `moby-dick make-ocean-mesh CONFIG.toml OUTPUT.msh` (mesh from `configs/mesh/*.toml`; their paths are container
+  `moby-dick make-ocean-mesh CONFIG.toml OUTPUT.nc [--msh FILE]` (mesh from `configs/mesh/*.toml`, written as a mesh
+  file, see "Mesh files" below; `--msh` also writes the mesh alone in gmsh's format, for viewing; paths are container
   paths, as in the training configs: run it in the image with the data mounted, e.g. `apptainer exec --bind
   data/geometry:/data/geometry moby-dick.sif python -m mobydick make-ocean-mesh configs/mesh/uniform_120km.toml
-  /data/geometry/uniform_120km.msh`; the `lambrechts*` configs also need the bathymetry at `/data/bathymetry`; the
+  /data/geometry/uniform_120km.nc`; the `lambrechts*` configs also need the bathymetry at `/data/bathymetry`; the
   coastline coarsening is the minimum of `[[coarsen_boundaries.fields]]`, like the mesh size of `[[fields]]`; there is
-  no `--data-path` since 12 Nov 2026), `moby-dick compute-grid-basis MESH MASK OUTPUT.npz`
+  no `--data-path` since 12 Nov 2026), `moby-dick combine-meshes OUTPUT.nc FINE.nc COARSE.nc ...` (mesh files of one
+  mesh each, finest first, into one hierarchy file with the links between levels), `moby-dick compute-grid-basis MESH
+  MASK OUTPUT.npz [--level L]`
   (draft: linear basis functions of the mesh at the ocean points of the training grid, barycentric weights in the
   decoder faces, a sparse matrix; `basis_utils.compute_basis` evaluates them at any points, e.g. the vertices of
   another mesh for the planned interpolating decoder and hierarchical meshes; on a flat mesh it equals scipy's
@@ -36,15 +40,14 @@ NVIDIA JAX container `nvcr.io/nvidia/jax:26.09-py3` plus GDAL/PROJ from Spack). 
   11.8 / 13.7 / 18.6 s and ~2 GiB peak host memory for 120 / 50 / 35 / 25 km meshes at the 693,039 ocean points, as
   long as building the decoder edges at startup; 50 → 25 km mesh vertices 15.3 s, 1.7 GiB; the matrix is 18.5 MiB.
   So the basis can be computed when the model is built instead of saved),
-  `moby-dick make-icosahedral-mesh CONFIG.toml OUTPUT.msh` (experimental: the icosahedral multi-mesh on the WGS84
+  `moby-dick make-icosahedral-mesh CONFIG.toml OUTPUT.nc` (experimental: the icosahedral multi-mesh on the WGS84
   ellipsoid, for comparison with the ocean meshes; settings `splits`, `description`, `license` in
   `configs/mesh/icosahedral_*.toml`, `IcosahedralMeshConfig`; `mesh.path` of a training config can point to the
   output; `icosahedral_6.toml`, GraphCast's 6 refinements, gives 40,962 vertices, 327,660 directed edges, finest
-  edges 110–132 km, 11.6 MB). Its `.msh`
-  holds the finest triangles, the edges of all levels as line elements in the `multi_mesh_edges` physical group (line
-  elements outside it are a mesh's boundary), and GraphCast's mesh size (longest finest edge) at every node. Trained
-  on 8 Nov 2026 against the ocean meshes (see "Icosahedral multi-mesh vs ocean mesh" below); the file is
-  `data/geometry/icosahedral_6.msh`.
+  edges 110–132 km, 11.6 MB as `.msh`). Its mesh file holds the finest triangles, the edges of all levels as the
+  processor's edges, and GraphCast's mesh size (longest finest edge) at every node; it has no boundary. Trained on 8
+  Nov 2026 against the ocean meshes (see "Icosahedral multi-mesh vs ocean mesh" below), from
+  `data/geometry/icosahedral_6.msh` (to be regenerated as `.nc`).
 - Graph statistics: `moby-dick graph-statistics CONFIG.toml REGIONS.toml OUTPUT.json` (package
   `mobydick.graph_statistics`: `config`, `graphs`, `structure`, `geometry`, `squashed`, `quantities`, `report`, `cli`;
   `configs/analysis/graph_statistics.toml`, the production model: `mask` and `[[meshes]]` with `path` and
@@ -126,7 +129,7 @@ NVIDIA JAX container `nvcr.io/nvidia/jax:26.09-py3` plus GDAL/PROJ from Spack). 
   "Standardized anomaly stores" below.
 - Mesh study: `clusters/jupiter/slurm/mesh_study.sh [--account A] STUDY SEEDS MESH:MSG_STEPS[:EDGE_CHUNK_SIZE[:HH:MM:SS]]
   ...` (demo_5000 on 8 nodes per case and seed, validation loss on held-out windows; jobs use the checkout's `src`;
-  MESH is a uniform mesh's size, `GEOMETRY_DIR/uniform_MESH.msh`, or another mesh file's name, `GEOMETRY_DIR/MESH.msh`).
+  MESH is a uniform mesh's size, `GEOMETRY_DIR/uniform_MESH.nc`, or another mesh file's name, `GEOMETRY_DIR/MESH.nc`).
 - Benchmarks: JUBE in `clusters/jupiter/benchmarks/jube` (`uv sync`, then
   `uv run jube run training.xml --tag <sweep> [modifiers]`; add `dryrun` to check without submitting).
   Everything runs at all 50 levels (`production_run.toml`, coarse mesh × 8 steps unless a tag says otherwise); cases
@@ -498,7 +501,7 @@ so a volume variable's loss is about 1/n_levels of a surface variable's: surface
 weights: linear in that coordinate, summing to 1.
 
 **Training loop** (`training.py`, helpers in `training_utils.py`): builds the mesh (`get_mesh` →
-`mesh_graph.read_mesh_data`), the predictor, an optax optimizer from named transformations, Orbax checkpoints,
+`ugrid.read_mesh_file`, `[mesh] path` and `level`), the predictor, an optax optimizer from named transformations, Orbax checkpoints,
 TensorBoard logging, and a data-parallel `fsdp_map` over the device mesh (`sharding.py`). The train step is
 lowered and compiled once; its XLA memory analysis (`cli_utils.run_analysis_and_report`, "Memory usage" in the
 log) predicts GPU OOM before training starts.
@@ -579,8 +582,29 @@ download-mask`. With the previous dataloader (zarr-python, standardizing per sam
 about 2 workers at all 50 depth levels. With the new one (29 Oct 2026) every setting from 0 x 4 to 4 x 2 keeps the
 GPUs busy at 50 levels and 8 x 2 runs out of host memory; the `.env` default is 1 worker x 2 threads.
 
-**Meshes**: `geospatial_mesh.py` (seamsh, coastline shapefiles) generates `.msh` files from `configs/mesh/*.toml`;
+**Meshes**: `geospatial_mesh.py` (seamsh, coastline shapefiles) generates mesh files from `configs/mesh/*.toml`;
 generated meshes and geometry live in `data/geometry` (gitignored, bound as `/data/geometry`).
+- **Mesh files** (since 27 Nov 2026, `mobydick/ugrid.py`; decided: NetCDF-4 with h5netcdf, so that UGRID tools
+  such as QGIS and ParaView open them; no `.msh` reader any more, meshes are regenerated rather than converted): one mesh or a
+  hierarchy, finest first, each a UGRID topology `mesh<l>` with prefixed dimensions and variables: node lon/lat
+  (WGS84, the UGRID node coordinates), `node_cartesian_x/y/z` (Earth-centred metres, read back bit for bit, CRS in
+  `mesh<l>_crs:crs_wkt`), `face_nodes`, the processor's directed `edge_nodes` (sender first), `boundary` (from the
+  faces: nodes on edges of one face), `mesh_size` and `size_<field>` per size field (at the triangles' nodes only, which
+  fixes the extra view values of the old `.msh` writer), description and license on the topology variable. Between
+  consecutive levels, both ways: `mesh<a>_node_in_mesh<b>_face`, `_weights` (barycentric, `basis_utils.
+  barycentric_coordinates`) and `_distance` (0 inside): the mesh-to-mesh decoder connectivity and the interpolating
+  decoder's weights. gzip 4 with shuffle. `read_mesh_file(path, level)` returns the `MeshData` the model takes;
+  `read_size_fields`, `read_links`, `num_levels`; `write_mesh_file(path, meshes, size_fields)`. The configs point at
+  `uniform_*km.nc`: regenerate the meshes (`make-ocean-mesh`) before training with this code.
+  - **Viewers** (checked on 28 Nov 2026 with QGIS 3.44.7 and ParaView 6.0.1 on macOS; the first files, of 27 Nov,
+    opened in neither): QGIS lists every level as a mesh layer with its node fields (`Ugrid:"F.nc":mesh1`); ParaView's
+    UGRID reader reads files of one mesh only (with several it reads the other levels' node fields as fields of the
+    first and fails). What they need, all in `tests/test_ugrid.py`: text attributes NC_CHAR (h5netcdf writes `str` as
+    NC_STRING, and both read attributes with `nc_get_att_text`, so they found no `cf_role`); node fields int32 or
+    floating point (MDAL reads no int8 or int16); a node field with one value everywhere stored as a scalar (QGIS
+    crashes, SIGBUS, on a constant non-zero node field, e.g. every uniform size field; the readers broadcast it); no
+    `<mesh>_node_z` (MDAL's fallback name for the elevation); the [nodes, 3] link weights without `location` (else
+    read as 3 values at as many times as nodes). Description and license are one text each (NC_CHAR holds no list).
 - **Settings:** validated by `mesh_config.MeshGenerationConfig` (pydantic, unknown keys rejected). It holds the gmsh
   options, smoothness, domain shapefile, boundary coarsening, and a list of size fields discriminated by `name`
   (`uniform`, `shore_proximity`, `bathymetry`, `bathymetry_hessian`), each type at most once. The target size is the
@@ -596,8 +620,8 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
     process failed with a `KeyError`; it calls `gmsh.clear()` first.
 - **Naming:** uniform meshes are named by their target size in km (`uniform_120km` was `uniform_coarse` until 30 Oct
   2026; the `uniform_coarse.msh` and `uniform_fine.msh` symlinks to the new names were removed on 8 Nov 2026). Each
-  `.msh` stores the size field it was made with (views `MeshSize` and one per field) and
-  the config's description. Measured median edge lengths match the targets: 117.8 km for 120 km, 34.9 for 35, 30.0
+  mesh file stores the size fields it was made with (`mesh_size` and `size_<field>`; the old `.msh` files: views
+  `MeshSize` and one per field) and the config's description. Measured median edge lengths match the targets: 117.8 km for 120 km, 34.9 for 35, 30.0
   for 30.
 - **The 25 km mesh** (`uniform_25km`, formerly `uniform_fine`, 704,078 nodes, 31 Jan 2026):
   - its stored size field is 25 km at every node, and its median edge is 25.0 km;
@@ -628,7 +652,8 @@ generated meshes and geometry live in `data/geometry` (gitignored, bound as `/da
   so a second basin could not be meshed anyway. Natural Earth's coastline counts ice shelves as ocean. Mesh files
   hold nodes in no triangle: the outlines of islands smaller than the mesh size, which survive the coarsening but are
   covered by triangles (743 of 34,750 nodes at 120 km, 632 islands up to ~100 km across; 655 of 181,980 at 50 km);
-  `read_mesh` drops them and logs how many (since 11 Nov 2026). A
+  `read_mesh` dropped them and logged how many (11–27 Nov 2026; the `.msh` reader is gone, and `make-ocean-mesh`
+  writes the nodes of the triangles only). A
   refactoring of seamsh (tests, hooks, fixes, several seeds and one surface per basin) is prepared in a separate PR to
   the fork's `develop`: kit with PR guide, notes (bugs with line numbers), validation script, reference results, data
   and moby-dick's mesh code in `$PROJECT/claude-work/ed336b51-7c1c-4db2-b3ca-b6880ad836fd/seamsh-refactoring-kit{,.tar.gz}` (copy it out before this session's directory is deleted). The script reproduces

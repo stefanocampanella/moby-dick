@@ -42,7 +42,10 @@ class MeshLevelConfig(BaseModel):
 
   model_config = ConfigDict(extra="forbid")
 
-  path: pathlib.Path = Field(description="Mesh file (.msh, from make-ocean-mesh or make-icosahedral-mesh)")
+  path: pathlib.Path = Field(
+    description="Mesh file (UGRID, NetCDF-4: make-ocean-mesh, make-icosahedral-mesh or combine-meshes)"
+  )
+  level: NonNegativeInt = Field(default=0, description="Mesh of the file (0: the finest), for a hierarchy file")
   message_passing_steps: NonNegativeInt = Field(
     description="Message passing steps of the mesh's processor (the model's gnn_msg_steps for one mesh; in a "
     "hierarchy, the steps on this mesh on the way down the V-cycle)"

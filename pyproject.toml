@@ -24,6 +24,9 @@ dependencies = [
     "gmsh",
     "grain >= 0.2.16",
     "graphviz >= 0.21",
+    # Mesh files: UGRID in NetCDF-4 (mobydick.ugrid), read and written with xarray.
+    "h5netcdf",
+    "h5py",
     "humanize",
     "ipywidgets",
     # Should be kept it in sync with the version used in NVIDIA container
