@@ -1877,6 +1877,46 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
   - A core-only environment on the laptop passes the tests, with the three mesh modules skipped.
   - The images were not built: there is no Apptainer on the laptop.
 
+## 2026-11-27 20:05: one config for a mesh hierarchy
+
+- **Request:**
+  - One configuration file makes a whole hierarchy, instead of separate meshes combined afterwards.
+  - The finest mesh keeps the strait refinement (one connected ocean). The coarser ones coarsen the coastline at
+    their own size and may be in pieces.
+  - First hierarchy: 50, 120 and 300 km.
+- **Change:**
+  - `MeshGenerationConfig` takes one mesh, or `[[levels]]` finest first, each with its own coarsening, seeds and size
+    fields.
+  - `make-ocean-mesh` loads the coastline once, meshes each level, refuses levels not finest first, and writes one
+    file with the links. `--msh` writes one gmsh file per level.
+  - New config `configs/mesh/hierarchy_50_120_300km.toml`.
+  - Links gain `_inside` (`basis_utils.within_mesh`). The docstring of #12 said the distance is 0 inside, but on the
+    sphere the flat faces sag below the surface by up to r²/2R, so it never is.
+- **Experiment:** made the hierarchy and the 120 km uniform mesh locally. Quality per level, pieces, lost seas, and
+  nodes outside the coarser levels are in CLAUDE.md ("Hierarchies in one config"). In short:
+  - the coarse levels meet the targets;
+  - the 50 km level, with its 10 km coastline and 3 km strait elements, does not;
+  - seeds lost at a level were removed from it.
+
+## 2026-11-27 20:15: code reviews of #13 and #14
+
+- **#13 (mesh extra):**
+  - The mesh image's recipe ran `%post` under `sh`, without `git` (needed for seamsh's pin) and without
+    `MAMBA_ROOT_PREFIX`: now bash, the environment's binaries by path, and `git` in the environment file.
+  - The image ships the license texts of the conda packages and seamsh's.
+  - The subprocess tests import the sources (`PYTHONPATH`).
+  - ty ignores the unresolved gmsh and seamsh imports in `mobydick.meshing` and its tests.
+  - A gmsh raising `OSError` (missing native libraries) no longer breaks `--help`.
+  - seamsh 0.6.0+fork is GPL-3.0-or-later (its License-Expression), so the image's label stands.
+- **#14 (hierarchy), important:** `within_mesh` bounded the sag by the circumradius, which is unbounded for flat
+  faces, so a node 5.4 km off a coastal sliver counted as inside. Obtuse and right faces are now bounded by
+  (longest edge)²/8R, with a test. The counts on the local hierarchy are unchanged (7.26 % and 10.44 % outside): the
+  coarser levels have no such slivers.
+- **#14, also:**
+  - `--msh` files are written only after the level-order check, so a refused hierarchy leaves nothing behind;
+  - `read_links` explains a file without `_inside`;
+  - no data path in the config comment, and long lines wrapped.
+
 ## 2026-11-28 09:40: the mesh files did not open in QGIS or ParaView
 
 - **Request:** the maintainer tried the new mesh files in ParaView and QGIS; both failed.
@@ -1886,7 +1926,7 @@ Session directory `$PROJECT/claude-work/875379cd-19a4-4f43-a956-bd19e2b1b6a6`.
 - **Found by opening the files** in QGIS 3.44.7 (its Python, a throwaway profile) and ParaView 6.0.1 (`pvpython --dr`),
   removing variables until they opened:
   - text attributes as NC_CHAR (fixed-length UTF-8); description and license one text each;
-  - MDAL reads node fields of int32 or floating point only: `boundary` is int32 (int8 before);
+  - MDAL reads node fields of int32 or floating point only: `boundary` and `_inside` are int32 (int8 before);
   - QGIS crashes (SIGBUS) on a node field with one non-zero value everywhere, e.g. a uniform size field: such fields
     are scalars, broadcast when read;
   - `node_x/y/z` became `node_cartesian_x/y/z`: MDAL takes `<mesh>_node_z` for the elevation;

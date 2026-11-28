@@ -43,8 +43,10 @@ field) is stored as a scalar and read back at every node: QGIS 3.44 crashes on s
 Between two consecutive levels a (finer) and b (coarser), both ways: `mesh<a>_node_in_mesh<b>_face` (the face of
 mesh b closest to each node of mesh a: containing it, or nearest for a node outside mesh b),
 `mesh<a>_node_in_mesh<b>_weights` (the barycentric coordinates of the closest point in that face, of its three nodes
-in the order of `mesh<b>_face_nodes`) and `mesh<a>_node_in_mesh<b>_distance` (metres, 0 inside). These are the
-mesh-to-mesh decoder connectivity (3 edges per receiver) and the weights of an interpolating decoder.
+in the order of `mesh<b>_face_nodes`), `mesh<a>_node_in_mesh<b>_distance` (metres; inside, at most the sag of the
+flat faces below the surface; more outside) and `mesh<a>_node_in_mesh<b>_inside` (1 when the node is within mesh b:
+its distance is at most that sag, `basis_utils.within_mesh`). These are the mesh-to-mesh decoder connectivity (3 edges
+per receiver) and the weights of an interpolating decoder.
 """
 
 import logging
@@ -56,7 +58,7 @@ import numpy as np
 import pyproj
 import xarray as xr
 
-from mobydick.basis_utils import barycentric_coordinates
+from mobydick.basis_utils import barycentric_coordinates, within_mesh
 from mobydick.gis_utils import cartesian_crs, cartesian_to_lat_lon
 from mobydick.mesh_graph import MeshData, MeshGraph
 
@@ -210,7 +212,9 @@ def links_dataset(fine: MeshGraph, coarse: MeshGraph, fine_level: int) -> xr.Dat
     (fine_level, fine_level + 1, fine, coarse),
     (fine_level + 1, fine_level, coarse, fine),
   ):
-    face, weights, distance = barycentric_coordinates(faces_of, np.asarray(nodes_of.vertices, np.float64))
+    points = np.asarray(nodes_of.vertices, np.float64)
+    face, weights, distance = barycentric_coordinates(faces_of, points)
+    inside = within_mesh(faces_of, face, points, distance)
     name, nodes = _link_name(a, b), f"{level_name(a)}_nNodes"
     attributes = {"location": "node", "mesh": level_name(a)}
     variables[f"{name}_face"] = xr.Variable(
@@ -225,7 +229,17 @@ def links_dataset(fine: MeshGraph, coarse: MeshGraph, fine_level: int) -> xr.Dat
       {"long_name": f"Barycentric coordinates of the closest point, of the nodes of {name}_face"},
     )
     variables[f"{name}_distance"] = xr.Variable(
-      nodes, distance, {**attributes, "units": "m", "long_name": f"Distance to {level_name(b)} (0: inside)"}
+      nodes, distance, {**attributes, "units": "m", "long_name": f"Distance to the closest point of {level_name(b)}"}
+    )
+    variables[f"{name}_inside"] = xr.Variable(
+      nodes,
+      inside.astype(np.int32),
+      {
+        **attributes,
+        "flag_values": np.array([0, 1], dtype=np.int32),
+        "flag_meanings": "outside inside",
+        "long_name": f"Node within {level_name(b)}",
+      },
     )
   return xr.Dataset(variables)
 
@@ -321,18 +335,23 @@ def read_size_fields(path: pathlib.Path | str, level: int = 0) -> dict[str, np.n
     }
 
 
-def read_links(path: pathlib.Path | str, level: int, other: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def read_links(
+  path: pathlib.Path | str, level: int, other: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
   """For each node of mesh `level`, the closest face of mesh `other` (a neighbouring level), the barycentric weights
-  of that face's nodes, and the distance to it (metres)."""
+  of that face's nodes, the distance to it (metres), and whether the node is within mesh `other` (boolean)."""
   if abs(level - other) != 1:
     raise ValueError(f"Links are stored between consecutive levels only, not {level} and {other}")
   name = _link_name(level, other)
   with xr.open_dataset(path, engine="h5netcdf") as dataset:
     if f"{name}_face" not in dataset:
       raise ValueError(f"{path} has no links between levels {level} and {other}")
+    if f"{name}_inside" not in dataset:
+      raise ValueError(f"{path} was written before the links held `_inside` (27 Nov 2026): regenerate it")
     nodes = f"{level_name(level)}_nNodes"
     return (
       _node_values(dataset, f"{name}_face", nodes),
       dataset[f"{name}_weights"].values,
       _node_values(dataset, f"{name}_distance", nodes),
+      _node_values(dataset, f"{name}_inside", nodes).astype(bool),
     )

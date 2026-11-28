@@ -97,6 +97,7 @@ Every step is a subcommand of `moby-dick`, configured by a TOML file in `configs
 | `moby-dick compute-tendency-std STANDARDIZED OUTPUT --config configs/download/tendency_std.toml` | standard deviation of the daily changes, used to scale the residuals |
 | `moby-dick make-ocean-mesh CONFIG OUTPUT.nc [--msh FILE]` | generate an ocean mesh (`configs/mesh/`), a UGRID NetCDF-4 mesh file |
 | `moby-dick make-icosahedral-mesh CONFIG OUTPUT.nc` | generate the icosahedral multi-mesh (experimental) |
+| `moby-dick make-ocean-mesh configs/mesh/hierarchy_50_120_300km.toml OUTPUT.nc` | a hierarchy of ocean meshes (`[[levels]]`) in one file, with the links between levels |
 | `moby-dick combine-meshes OUTPUT.nc FINE.nc COARSE.nc ...` | put meshes into one hierarchy file, with the links between levels |
 | `moby-dick compute-grid-basis MESH MASK OUTPUT.npz` | linear basis functions of a mesh at the ocean grid points (draft) |
 | `moby-dick train CONFIG OUTPUT TRAIN_DIR [--continue]` | train a model (`configs/training/`) and save it to `OUTPUT` |

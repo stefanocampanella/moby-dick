@@ -24,7 +24,13 @@ from scipy.spatial import ConvexHull, Delaunay
 from mobydick import basis_utils, icosahedral_mesh, mesh_connectivity
 from mobydick.basis import compute_grid_basis_command
 from mobydick.dataloader_utils import get_grid
-from mobydick.gis_utils import cartesian_crs, cartesian_unit_sphere_crs, equirectangular_crs, get_transform
+from mobydick.gis_utils import (
+  cartesian_crs,
+  cartesian_unit_sphere_crs,
+  equirectangular_crs,
+  get_transform,
+  lat_lon_to_cartesian,
+)
 from mobydick.mesh_graph import TriangleMesh
 from mobydick.ugrid import write_mesh_file
 
@@ -259,3 +265,13 @@ def test_points_closest_to_a_degenerate_face_get_its_nearest_vertex():
   mesh = TriangleMesh(vertices=vertices, faces=np.array([[0, 1, 2]]))
   _, weights, _ = basis_utils.barycentric_coordinates(mesh, np.array([[1.9e5, 1e3, 0.0]]))
   np.testing.assert_array_equal(weights, [[0.0, 0.0, 1.0]])
+
+
+def test_points_outside_a_sliver_face_are_not_within_the_mesh():
+  """The sag bound of an obtuse or sliver face is (longest edge)² / 8R, not its circumradius (which grows without
+  bound as the face flattens): a point 5 km off a flat 50 km coastal sliver is outside, a point on it inside."""
+  vertices = lat_lon_to_cartesian(np.array([0.0, 0.001, 0.0]), np.array([0.0, 0.225, 0.45]))
+  mesh = TriangleMesh(vertices=vertices, faces=np.array([[0, 1, 2]]))
+  points = lat_lon_to_cartesian(np.array([0.05, 0.0005]), np.array([0.225, 0.2]))
+  faces, _, distances = basis_utils.barycentric_coordinates(mesh, points)
+  np.testing.assert_array_equal(basis_utils.within_mesh(mesh, faces, points, distances), [False, True])

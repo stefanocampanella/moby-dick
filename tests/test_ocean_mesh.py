@@ -38,7 +38,7 @@ from mobydick.gis_utils import (
 from mobydick.mesh_graph import face_components, faces_to_edges
 from mobydick.meshing.geospatial_mesh import make_ocean_mesh
 from mobydick.meshing.geospatial_mesh_utils import PointRefinementField
-from mobydick.ugrid import read_mesh_file, read_size_fields
+from mobydick.ugrid import num_levels, read_links, read_mesh_file, read_size_fields
 
 COAST_LATITUDE = -70.0
 
@@ -308,3 +308,62 @@ def test_the_optimize_setting_reaches_seamsh(coastline, monkeypatch, optimize):
   monkeypatch.setattr(seamsh.gmsh, "mesh", spy)
   _mesh(coastline, f"optimize_{optimize}", extra=f"[mesh]\noptimize = {str(optimize).lower()}\n")
   assert [call["optimize"] for call in calls] == [optimize]
+
+
+def _hierarchy_config(coastline: pathlib.Path, levels: list[tuple[str, float, float, str]]) -> pathlib.Path:
+  """A hierarchy config on the channel coastline: per level, its name, coarsening and mesh size, and seeds (TOML)."""
+  text = f'[gmsh]\nverbosity = 0\n[domain]\nfilepath = "{coastline / "coast.shp"}"\ncurve_type = "polyline"\n'
+  channel = '{name = "point_refinement", points = [[0.0, 32.5]], size = 5_000.0, growth = 0.01}'
+  for name, coarsening, size, seeds in levels:
+    refined = name == "fine"
+    text += f'[[levels]]\nname = "{name}"\n'
+    text += f'[levels.coarsen_boundaries]\nx0 = {seeds}\nx0_projection = "equirectangular"\n'
+    text += f'fields = [{{name = "uniform", value = {coarsening}}}' + (f", {channel}]\n" if refined else "]\n")
+    text += f'[[levels.fields]]\nname = "uniform"\nvalue = {size}\n'
+    if refined:
+      text += '[[levels.fields]]\nname = "point_refinement"\npoints = [[0.0, 32.5]]\nsize = 10_000.0\ngrowth = 0.3\n'
+  path = coastline / "hierarchy.toml"
+  path.write_text(text)
+  return path
+
+
+def test_one_config_makes_a_hierarchy(channel_coastline):
+  """A config with levels makes every mesh from one coastline and writes them, with the links, to one file: the fine
+  level keeps the channel open (one connected ocean), the coarse one coarsens the coastline at its own size, so the
+  sea is a piece of its own, kept by its seed; with --msh each level gets a gmsh file."""
+  config = _hierarchy_config(
+    channel_coastline,
+    [("fine", 200_000.0, 300_000.0, "[[90.0, 0.0]]"), ("coarse", 400_000.0, 800_000.0, "[[90.0, 0.0], [0.0, 20.0]]")],
+  )
+  output, msh = channel_coastline / "hierarchy.nc", channel_coastline / "hierarchy.msh"
+  arguments = [str(config), str(output), "--msh", str(msh), "--log-level", "warning"]
+  result = CliRunner().invoke(make_ocean_mesh, arguments)
+  assert result.exit_code == 0, result.output
+  assert num_levels(output) == 2
+  fine, coarse = (read_mesh_file(output, level).mesh_graph for level in (0, 1))
+  assert face_components(fine.faces, len(fine.vertices))[0] == 1
+  assert face_components(coarse.faces, len(coarse.vertices))[0] == 2
+  assert len(fine.vertices) > len(coarse.vertices)
+  face, weights, _, _ = read_links(output, 0, 1)
+  assert face.shape == (len(fine.vertices),) and np.allclose(weights.sum(axis=1), 1.0)
+  assert sorted(path.name for path in channel_coastline.glob("hierarchy_level*.msh")) == [
+    "hierarchy_level0.msh",
+    "hierarchy_level1.msh",
+  ]
+  # The outputs exist: a second run needs --overwrite, also for the per-level gmsh files.
+  result = CliRunner().invoke(make_ocean_mesh, arguments)
+  assert result.exit_code != 0 and "--overwrite" in result.output
+
+
+def test_the_levels_of_a_hierarchy_must_be_finest_first(channel_coastline):
+  """Levels given coarsest first are refused after meshing, with the median edges, and nothing is written (neither the
+  mesh file nor the gmsh files of --msh, so that a corrected run needs no --overwrite)."""
+  config = _hierarchy_config(
+    channel_coastline,
+    [("coarse", 400_000.0, 800_000.0, "[[90.0, 0.0]]"), ("fine", 200_000.0, 300_000.0, "[[90.0, 0.0]]")],
+  )
+  output = channel_coastline / "reversed.nc"
+  arguments = [str(config), str(output), "--msh", str(channel_coastline / "reversed.msh"), "--log-level", "warning"]
+  result = CliRunner().invoke(make_ocean_mesh, arguments)
+  assert result.exit_code != 0 and "finest first" in result.output
+  assert not output.exists() and not list(channel_coastline.glob("reversed*.msh"))

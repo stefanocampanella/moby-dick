@@ -15,6 +15,7 @@
 # Seamsh usage example are taken from: https://jlambrechts.git-page.immc.ucl.ac.be/seamsh/examples/6-stereographics.html
 """moby-dick make-ocean-mesh: the ocean between coastlines meshed with seamsh and gmsh (the `mesh` extra)."""
 
+import itertools
 import logging
 import pathlib
 import sys
@@ -26,7 +27,8 @@ import seamsh
 
 from mobydick import cli_utils
 from mobydick.gis_utils import CRSRegistry
-from mobydick.mesh_config import MeshGenerationConfig
+from mobydick.mesh_commands import median_edge_length
+from mobydick.mesh_config import LevelConfig, MeshGenerationConfig
 from mobydick.mesh_graph import (
   MeshData,
   MeshGraph,
@@ -76,16 +78,21 @@ def make_ocean_mesh(
   overwrite: bool = False,
   log_level: str = "info",
 ):
-  """Mesh the ocean bounded by the coastline of CONFIG_PATH and write it, with its mesh size fields, to OUTPUT_PATH, a
-  mesh file (UGRID, NetCDF-4, e.g. .nc)."""
+  """Mesh the ocean bounded by the coastline of CONFIG_PATH, one mesh or a hierarchy (`levels`, finest first), and
+  write it, with its mesh size fields and the links between levels, to OUTPUT_PATH, a mesh file (UGRID, NetCDF-4,
+  e.g. .nc). With --msh and a hierarchy, each level goes to a file of its own (<stem>_level<l>.msh)."""
   cli_utils.configure_logging(log_level)
   # Invalid settings and an existing output fail before meshing.
   configs = cli_utils.read_configs(config_path, schema=MeshGenerationConfig)
-  for path in (output_path, msh_path):
-    if path is not None and path.exists() and not overwrite:
+  outputs = [output_path, *(msh_paths(msh_path, len(configs.mesh_levels())) if msh_path else [])]
+  for path in outputs:
+    if path.exists() and not overwrite:
       raise click.ClickException(f"{path} exists: pass --overwrite to replace it")
   logger.info(f"Using settings: {configs!r}")
-  write_ocean_mesh(configs, output_path, msh_path)
+  try:
+    write_ocean_mesh(configs, output_path, msh_path)
+  except LevelOrderError as error:
+    raise click.ClickException(str(error)) from error
 
 
 def gmsh_triangles() -> tuple[np.ndarray, np.ndarray]:
@@ -125,38 +132,41 @@ def warn_small_components(vertices: np.ndarray, faces: np.ndarray, max_faces: in
   return small
 
 
-def write_ocean_mesh(
-  configs: MeshGenerationConfig, output_path: pathlib.Path, msh_path: pathlib.Path | None = None
-) -> None:
-  """Mesh the domain with seamsh and gmsh, and write the mesh with its size fields (and their minimum, the mesh size)
-  at the nodes to a mesh file (`mobydick.ugrid`), and the mesh alone to `msh_path` (gmsh format) if given."""
-  # Progress bars only on a terminal, not in batch logs.
-  seamsh.show_progress(sys.stderr.isatty())
-  # gmsh needs to be initialized before most seamsh functions can be used.
-  if not gmsh.is_initialized():
-    logger.info("Initialize gmsh.")
-    gmsh.initialize()
-  gmsh.option.setNumber("General.Verbosity", configs.gmsh.verbosity)
-  gmsh.option.setNumber("Mesh.Algorithm", configs.gmsh.algorithm)
-  gmsh.option.setNumber("Mesh.MshFileVersion", configs.gmsh.msh_file_version)
-  gmsh.model.add(configs.model_name)
-  domain_path = pathlib.Path(configs.domain.filepath)
-  logger.info("Loading and coarsening boundary.")
-  domain = load_domain(
-    domain_path, physical_name_field=configs.domain.physical_name_field, curve_type=configs.domain.curve_type
-  )
+class LevelOrderError(ValueError):
+  """The levels of a hierarchy are not finest first."""
+
+
+def msh_paths(msh_path: pathlib.Path, levels: int) -> list[pathlib.Path]:
+  """The gmsh files of --msh: the path itself for one mesh, one file per level (`<stem>_level<l><suffix>`) for a
+  hierarchy (a .msh file holds one mesh)."""
+  if levels == 1:
+    return [msh_path]
+  return [msh_path.with_name(f"{msh_path.stem}_level{level}{msh_path.suffix}") for level in range(levels)]
+
+
+def mesh_level(
+  configs: MeshGenerationConfig, level: LevelConfig, domain, number: int
+) -> tuple[MeshData, dict[str, np.ndarray], str]:
+  """Mesh one level: coarsen the coastline of `domain` with the level's settings and seeds, mesh it with gmsh in a
+  model of its own, and return the mesh (nodes of the triangles only, boundary from the faces) with its size fields at
+  the nodes, and the name of the gmsh model (left in gmsh, for `write_msh`)."""
+  label = level.name or f"level {number}"
+  logger.info(f"{label}: coarsening the coastline and meshing")
+  model = f"{configs.model_name}_{number}"
+  gmsh.model.add(model)
   boundary = coarsen_boundaries(
     domain,
-    configs.coarsen_boundaries.fields,
-    x0=configs.coarsen_boundaries.seeds(),
-    x0_projection_name=configs.coarsen_boundaries.x0_projection,
+    level.coarsen_boundaries.fields,
+    x0=level.coarsen_boundaries.seeds(),
+    x0_projection_name=level.coarsen_boundaries.x0_projection,
   )
-  mesh_size = CompositeMeshSizeField(configs.fields)
+  mesh_size = CompositeMeshSizeField(level.fields)
   cartesian = CRSRegistry["cartesian"]
   seamsh.gmsh.mesh(
     boundary, mesh_size, output_srs=cartesian, smoothness=configs.mesh.smoothness, optimize=configs.mesh.optimize
   )
   vertices, faces = gmsh_triangles()
+  logger.info(f"{label}: {len(vertices):,} nodes, {len(faces):,} triangles")
   warn_small_components(vertices, faces, configs.mesh.small_component_max_faces)
   mesh = MeshData(
     mesh_graph=MeshGraph(
@@ -173,12 +183,62 @@ def write_ocean_mesh(
   fields: dict[str, np.ndarray] = {
     str(name): field.mesh_size_3d(vertices, projection=cartesian) for name, field in mesh_size.fields.items()
   }
-  write_mesh_file(output_path, [mesh], [fields])
-  if msh_path is not None:
-    logger.info(f"Writing the mesh in gmsh's format to {msh_path}")
-    if configs.license:
-      gmsh.model.setAttribute("license", [configs.license])
-    if configs.description:
-      gmsh.model.setAttribute("description", [configs.description])
-    msh_path.parent.mkdir(parents=True, exist_ok=True)
-    gmsh.write(str(msh_path))
+  return mesh, fields, model
+
+
+def write_msh(configs: MeshGenerationConfig, model: str, path: pathlib.Path) -> None:
+  """Write the gmsh model `model` (one level) to `path` in gmsh's format, with the license and description."""
+  gmsh.model.setCurrent(model)
+  logger.info(f"Writing {model} in gmsh's format to {path}")
+  if configs.license:
+    gmsh.model.setAttribute("license", [configs.license])
+  if configs.description:
+    gmsh.model.setAttribute("description", [configs.description])
+  path.parent.mkdir(parents=True, exist_ok=True)
+  gmsh.write(str(path))
+
+
+def write_ocean_mesh(
+  configs: MeshGenerationConfig, output_path: pathlib.Path, msh_path: pathlib.Path | None = None
+) -> None:
+  """Mesh the domain with seamsh and gmsh, one mesh or each level of a hierarchy (finest first), and write the meshes
+  with their size fields (and their minimum, the mesh size) at the nodes, and the links between levels, to a mesh
+  file (`mobydick.ugrid`); with `msh_path`, also each mesh alone in gmsh's format (`msh_paths`)."""
+  # Progress bars only on a terminal, not in batch logs.
+  seamsh.show_progress(sys.stderr.isatty())
+  # gmsh needs to be initialized before most seamsh functions can be used.
+  if not gmsh.is_initialized():
+    logger.info("Initialize gmsh.")
+    gmsh.initialize()
+  gmsh.option.setNumber("General.Verbosity", configs.gmsh.verbosity)
+  gmsh.option.setNumber("Mesh.Algorithm", configs.gmsh.algorithm)
+  gmsh.option.setNumber("Mesh.MshFileVersion", configs.gmsh.msh_file_version)
+  logger.info("Loading the coastline.")
+  # Loaded once: each level coarsens it into a new domain.
+  domain = load_domain(
+    pathlib.Path(configs.domain.filepath),
+    physical_name_field=configs.domain.physical_name_field,
+    curve_type=configs.domain.curve_type,
+  )
+  levels = configs.mesh_levels()
+  paths: list[pathlib.Path | None] = list(msh_paths(msh_path, len(levels))) if msh_path else [None] * len(levels)
+  meshes, size_fields, models = [], [], []
+  try:
+    for number, level in enumerate(levels):
+      mesh, fields, model = mesh_level(configs, level, domain, number)
+      meshes.append(mesh)
+      size_fields.append(fields)
+      models.append(model)
+    # Checked before anything is written: no output is left behind by a refused hierarchy.
+    lengths = [median_edge_length(mesh.mesh_graph) for mesh in meshes]
+    if any(coarser < finer for finer, coarser in itertools.pairwise(lengths)):
+      km = ", ".join(f"{length / 1e3:.1f}" for length in lengths)
+      raise LevelOrderError(f"The levels must be given finest first; their median edges are {km} km")
+    write_mesh_file(output_path, meshes, size_fields)
+    for model, path in zip(models, paths, strict=True):
+      if path is not None:
+        write_msh(configs, model, path)
+  finally:
+    for model in models:
+      gmsh.model.setCurrent(model)
+      gmsh.model.remove()

@@ -132,18 +132,20 @@ def test_the_file_opens_in_qgis_and_paraview(tmp_path):
     file.visititems(check_texts)
   with xr.open_dataset(path, engine="h5netcdf", decode_cf=False) as dataset:
     fields = [name for name, variable in dataset.variables.items() if variable.attrs.get("location") == "node"]
-    assert "mesh0_boundary" in fields and "mesh0_node_in_mesh1_distance" in fields
+    assert {"mesh0_boundary", "mesh0_node_in_mesh1_distance", "mesh0_node_in_mesh1_inside"} <= set(fields)
     for name in fields:
       values = dataset[name].values
       assert values.dtype in (np.int32, np.float32, np.float64), name
       assert values.ndim == 1 and not (values == values[0]).all(), name
-    # The uniform size field, and the coarse nodes' distances (0: they are fine nodes), are scalars.
-    assert dataset["mesh0_size_uniform"].ndim == 0 and dataset["mesh1_node_in_mesh0_distance"].ndim == 0
+    # The uniform size field, and the coarse nodes' distances (0: they are fine nodes) and `inside`, are scalars.
+    for name in ("mesh0_size_uniform", "mesh1_node_in_mesh0_distance", "mesh1_node_in_mesh0_inside"):
+      assert dataset[name].ndim == 0, name
     assert not [name for name in dataset.variables if str(name).endswith("_node_z")]
     assert "location" not in dataset["mesh0_node_in_mesh1_weights"].attrs
   np.testing.assert_array_equal(ugrid.read_size_fields(path)["uniform"], constant)
-  distance = ugrid.read_links(path, 1, 0)[2]
-  assert distance.shape == (len(coarse.mesh_graph.vertices),) and (distance == 0).all()
+  _, _, distance, inside = ugrid.read_links(path, 1, 0)
+  assert distance.shape == inside.shape == (len(coarse.mesh_graph.vertices),)
+  assert (distance == 0).all() and inside.all()
   read = ugrid.read_mesh_file(path, 1)
   assert read.mesh_size is not None and coarse.mesh_size is not None
   np.testing.assert_array_equal(read.mesh_size, coarse.mesh_size)
@@ -160,7 +162,11 @@ def test_a_hierarchy_holds_every_level_and_the_links_between_them(tmp_path):
   for level, mesh in enumerate((fine, coarse)):
     np.testing.assert_array_equal(ugrid.read_mesh_file(path, level).mesh_graph.faces, mesh.mesh_graph.faces)
   for level, other, nodes, faces in ((0, 1, fine, coarse), (1, 0, coarse, fine)):
-    face, weights, distance = ugrid.read_links(path, level, other)
+    face, weights, distance, inside = ugrid.read_links(path, level, other)
+    # Both meshes cover the sphere: every node is within the other one, also the fine nodes off its flat faces.
+    assert inside.all()
+    if level == 0:
+      assert (distance > 1e3).any()
     vertices = nodes.mesh_graph.vertices
     assert face.shape == (len(vertices),) and weights.shape == (len(vertices), 3)
     assert face.max() < len(faces.mesh_graph.faces) and (weights >= 0).all()
@@ -170,9 +176,21 @@ def test_a_hierarchy_holds_every_level_and_the_links_between_them(tmp_path):
     closest = np.einsum("ij,ijk->ik", weights, corners)
     np.testing.assert_allclose(np.linalg.norm(closest - vertices, axis=1), distance, rtol=1e-6, atol=1e-3)
   # Coarse vertices are vertices of the fine mesh: they lie on it, at one of its faces' corners.
-  _, weights, distance = ugrid.read_links(path, 1, 0)
+  _, weights, distance, _ = ugrid.read_links(path, 1, 0)
   np.testing.assert_allclose(distance, 0.0, atol=1e-3)
   np.testing.assert_allclose(weights.max(axis=1), 1.0, atol=1e-6)
+
+
+def test_nodes_outside_the_other_mesh_are_flagged(tmp_path):
+  """Nodes of a closed mesh north of an open mesh's edge (60° N) are outside the open mesh: flagged so, with the
+  distance to its nearest face, while the nodes well inside it are within it."""
+  closed, open_mesh = icosahedral_mesh.get_multi_mesh_data(3), _ocean_like(2)
+  path = tmp_path / "pair.nc"
+  ugrid.write_mesh_file(path, [closed, open_mesh])
+  _, _, distance, inside = ugrid.read_links(path, 0, 1)
+  lat, _ = cartesian_to_lat_lon(closed.mesh_graph.vertices)
+  assert not inside[lat > 75.0].any() and distance[lat > 75.0].min() > 500e3
+  assert inside[lat < 45.0].all()
 
 
 def test_only_earth_centred_metres_are_written(tmp_path):
@@ -197,6 +215,13 @@ def test_missing_levels_and_links_are_errors(tmp_path):
     ugrid.read_links(path, 0, 2)
   with pytest.raises(ValueError, match="No mesh"):
     ugrid.write_mesh_file(tmp_path / "empty.nc", [])
+  # A hierarchy written before the links held `_inside` is to be regenerated.
+  hierarchy, old = tmp_path / "hierarchy.nc", tmp_path / "old.nc"
+  ugrid.write_mesh_file(hierarchy, [icosahedral_mesh.get_multi_mesh_data(2), icosahedral_mesh.get_multi_mesh_data(1)])
+  with xr.open_dataset(hierarchy, engine="h5netcdf", decode_cf=False) as dataset:
+    dataset.drop_vars(["mesh0_node_in_mesh1_inside"]).to_netcdf(old, engine="h5netcdf")
+  with pytest.raises(ValueError, match="regenerate"):
+    ugrid.read_links(old, 0, 1)
 
 
 def test_combine_meshes(tmp_path):
